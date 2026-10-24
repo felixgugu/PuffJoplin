@@ -1,0 +1,27 @@
+{
+  "name": "puffjoplin-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "predev": "npm run copy-vditor-assets",
+    "dev": "vite",
+    "prebuild": "npm run copy-vditor-assets",
+    "build": "tsc --noEmit && vite build",
+    "copy-vditor-assets": "node scripts/copy-vditor-assets.mjs",
+    "test": "vitest run",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "19.1.5",
+    "react-dom": "19.1.5",
+    "vditor": "4.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "5.0.5"
+  }
+}

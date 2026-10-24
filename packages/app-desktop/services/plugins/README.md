@@ -1,1 +1,0 @@
-Platform-specific (here desktop) plugin methods should be implemented here.

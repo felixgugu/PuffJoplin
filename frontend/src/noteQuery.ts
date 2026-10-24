@@ -1,0 +1,48 @@
+import type {
+  NoteQuery,
+  NoteSortBy,
+  NoteSortDirection,
+  SearchScope,
+  View,
+} from './types';
+
+interface NoteQueryOptions {
+  view: View;
+  search: string;
+  searchScope: SearchScope;
+  searchNotebookID: string;
+  sortBy: NoteSortBy;
+  sortDirection: NoteSortDirection;
+  limit?: number;
+  offset?: number;
+}
+
+export function buildNoteListQuery(options: NoteQueryOptions): NoteQuery {
+  const searching = options.search.trim() !== '';
+  let queryView = options.view.kind;
+  let notebookId = options.view.kind === 'notebook' ? options.view.id : '';
+  let tagId = options.view.kind === 'tag' ? options.view.id : '';
+
+  if (searching) {
+    if (options.searchScope === 'current' && options.searchNotebookID) {
+      queryView = options.view.kind === 'trash' ? 'trash' : 'notebook';
+      notebookId = options.searchNotebookID;
+      tagId = '';
+    } else {
+      queryView = options.view.kind === 'trash' ? 'trash' : 'all';
+      notebookId = '';
+      tagId = '';
+    }
+  }
+
+  return {
+    view: queryView,
+    notebookId,
+    tagId,
+    search: options.search,
+    sortBy: options.sortBy,
+    sortDirection: options.sortDirection,
+    limit: options.limit ?? 300,
+    offset: options.offset ?? 0,
+  };
+}

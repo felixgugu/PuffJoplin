@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "PuffJoplin",
+  "outputfilename": "PuffJoplin",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "felixgugu"
+  },
+  "info": {
+    "companyName": "PuffJoplin",
+    "productName": "PuffJoplin",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright 2026 PuffJoplin contributors",
+    "comments": "A local-first desktop notebook built with Go and Wails."
+  }
+}

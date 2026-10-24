@@ -1,1 +1,0 @@
-${\displaystyle f(n)={\begin{cases}n/2&{\text{if }}n\equiv 0{\pmod {2}},\\3n+1&{\text{if }}n\equiv 1{\pmod {2}}.\end{cases}}}$

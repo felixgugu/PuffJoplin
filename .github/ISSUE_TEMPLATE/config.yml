@@ -1,8 +1,0 @@
-blank_issues_enabled: true
-contact_links:
-    - name: Feature Requests
-      url: https://discourse.joplinapp.org/c/features/
-      about: Discuss ideas for new features or changes
-    - name: Support
-      url: https://discourse.joplinapp.org/c/support/
-      about: Please ask for help here

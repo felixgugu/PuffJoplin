@@ -1,3 +1,0 @@
-```fountain
-<img src=x onerror="something()"/>... 
-```

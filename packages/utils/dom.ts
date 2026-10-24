@@ -1,9 +1,0 @@
-/* eslint-disable import/prefer-default-export */
-
-export const findParentElementByClassName = (element: Element | null, parentClassName: string) => {
-	while (element) {
-		if (element.classList.contains(parentClassName)) return element;
-		element = element.parentElement;
-	}
-	return null;
-};
