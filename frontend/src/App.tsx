@@ -89,6 +89,10 @@ import type {
 const emptyNote: Note = {
   id: '',
   notebookId: '',
+  storageKind: 'database',
+  externalPath: '',
+  externalMTime: 0,
+  externalSize: 0,
   title: '',
   body: '',
   isTodo: false,
@@ -221,6 +225,7 @@ export default function App() {
   } | null>(null);
   const [moveNoteDialog, setMoveNoteDialog] = useState<NoteSummary | null>(null);
   const [notebookDialog, setNotebookDialog] = useState<NotebookDialogState | null>(null);
+  const [newNotebookMenuOpen, setNewNotebookMenuOpen] = useState(false);
   const [notebookPickerSearch, setNotebookPickerSearch] = useState('');
   const [draggingNoteID, setDraggingNoteID] = useState('');
   const [dropNotebookID, setDropNotebookID] = useState('');
@@ -242,6 +247,7 @@ export default function App() {
   const saveTimer = useRef<number | null>(null);
   const editorRef = useRef<VditorEditorHandle | null>(null);
   const notebookDialogInputRef = useRef<HTMLInputElement | null>(null);
+  const newNotebookMenuRef = useRef<HTMLDivElement | null>(null);
   const editorTabsRef = useRef(editorTabs);
   const currentRef = useRef(current);
   const initializedRef = useRef(false);
@@ -284,6 +290,17 @@ export default function App() {
       document.removeEventListener('scroll', close, true);
     };
   }, [notebookContextMenu]);
+
+  useEffect(() => {
+    if (!newNotebookMenuOpen) return undefined;
+    const close = (event: PointerEvent) => {
+      if (!newNotebookMenuRef.current?.contains(event.target as Node)) {
+        setNewNotebookMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [newNotebookMenuOpen]);
 
   useEffect(() => {
     if (!noteContextMenu) return;
@@ -691,6 +708,17 @@ export default function App() {
       }),
       onEvent('import.finished', () => setImportProgress(null)),
       onEvent('app.error', (value) => setFatalError(String(value))),
+      onEvent('managedDirectory.refreshed', () => {
+        const note = currentRef.current;
+        if (note.storageKind !== 'directory' || !note.id || dirtyRef.current) return;
+        void api.getNote(note.id)
+          .then((updated) => {
+            if (currentRef.current.id !== updated.id || dirtyRef.current) return;
+            setCurrent(updated);
+            setEditorTabs((tabs) => updateEditorTabTitle(tabs, updated.id, updated.title));
+          })
+          .catch(() => undefined);
+      }),
     ];
     return () => cleanups.forEach((cleanup) => cleanup());
   }, [refreshNotes, refreshTaxonomy]);
@@ -756,6 +784,7 @@ export default function App() {
   }, [activeNotebookId, notify, refreshNotes, refreshTaxonomy, saveCurrent]);
 
   const openCreateNotebookDialog = useCallback((parentID = '') => {
+    setNewNotebookMenuOpen(false);
     setNotebookDialog({
       mode: 'create',
       parentId: parentID,
@@ -765,6 +794,25 @@ export default function App() {
       saving: false,
     });
   }, []);
+
+  const openManagedMarkdownNotebook = useCallback(async () => {
+    setNewNotebookMenuOpen(false);
+    try {
+      const report = await api.openManagedMarkdownNotebook();
+      await refreshTaxonomy();
+      setSidebarTab('notebooks');
+      setView({ kind: 'notebook', id: report.notebookId });
+      setCollapsedNotebookIds((current) => {
+        const next = new Set(current);
+        next.delete(report.notebookId);
+        return next;
+      });
+      const warning = report.skipped > 0 ? `，略過 ${report.skipped} 個項目` : '';
+      notify(`已管理 ${report.rootPath}：${report.notes} 篇筆記${warning}`);
+    } catch (error) {
+      notify(`無法開啟 Markdown 目錄：${errorMessage(error)}`);
+    }
+  }, [notify, refreshTaxonomy]);
 
   const openRenameNotebookDialog = useCallback((notebook: Notebook) => {
     setNotebookDialog({
@@ -836,20 +884,42 @@ export default function App() {
   }, [openCreateNotebookDialog]);
 
   const deleteNotebook = useCallback(async (notebook: Notebook) => {
+    const managed = notebook.storageKind === 'directory';
     const confirmed = await api.confirm(
-      '刪除筆記本',
-      `確定要刪除「${notebook.title}」及其中的所有筆記嗎？此操作無法復原。`,
+      managed ? '停止管理資料夾' : '刪除筆記本',
+      managed
+        ? `要停止管理「${notebook.storageRoot}」嗎？磁碟上的 Markdown 與圖片不會被刪除。`
+        : `確定要刪除「${notebook.title}」及其中的所有筆記嗎？此操作無法復原。`,
     );
     if (!confirmed) return;
     try {
-      await api.deleteNotebook(notebook.id, true);
+      await api.deleteNotebook(notebook.id, !managed);
       setView({ kind: 'all' });
       setCurrent(emptyNote);
       await Promise.all([refreshTaxonomy(), refreshNotes()]);
     } catch (error) {
-      notify(`刪除失敗：${errorMessage(error)}`);
+      notify(`${managed ? '停止管理' : '刪除'}失敗：${errorMessage(error)}`);
     }
   }, [notify, refreshNotes, refreshTaxonomy]);
+
+  const refreshManagedNotebook = useCallback(async (notebook: Notebook) => {
+    try {
+      const report = await api.refreshManagedNotebook(notebook.id);
+      await Promise.all([refreshTaxonomy(), refreshNotes()]);
+      const warning = report.skipped > 0 ? `，略過 ${report.skipped} 個項目` : '';
+      notify(`已重新整理：${report.notes} 篇筆記${warning}`);
+    } catch (error) {
+      notify(`重新整理失敗：${errorMessage(error)}`);
+    }
+  }, [notify, refreshNotes, refreshTaxonomy]);
+
+  const revealNotebook = useCallback(async (notebook: Notebook) => {
+    try {
+      await api.revealNotebook(notebook.id);
+    } catch (error) {
+      notify(`無法開啟資料夾：${errorMessage(error)}`);
+    }
+  }, [notify]);
 
   const trashCurrent = useCallback(async () => {
     const note = currentRef.current;
@@ -1124,6 +1194,16 @@ export default function App() {
     }
   }, [notify, refreshNotes, saveCurrent]);
 
+  const canMoveNoteToNotebook = useCallback((note: NoteSummary, notebook: Notebook) => {
+    if (note.storageKind === 'directory') {
+      const source = notebooks.find((item) => item.id === note.notebookId);
+      return notebook.storageKind === 'directory' &&
+        !!source &&
+        source.storageRoot.toLocaleLowerCase() === notebook.storageRoot.toLocaleLowerCase();
+    }
+    return notebook.storageKind !== 'directory';
+  }, [notebooks]);
+
   const notebookRows = useMemo(
     () => buildNotebookRows(notebooks, collapsedNotebookIds),
     [collapsedNotebookIds, notebooks],
@@ -1140,11 +1220,23 @@ export default function App() {
   );
   const notebookChoices = useMemo(() => {
     const search = notebookPickerSearch.trim().toLocaleLowerCase();
+    const sourceNotebook = moveNoteDialog
+      ? notebooks.find((notebook) => notebook.id === moveNoteDialog.notebookId)
+      : null;
     return notebooks
       .map((notebook) => ({ notebook, path: notebookPath(notebooks, notebook.id) }))
       .filter(({ path }) => !search || path.toLocaleLowerCase().includes(search))
+      .filter(({ notebook }) => {
+        if (!moveNoteDialog) return true;
+        if (moveNoteDialog.storageKind === 'directory') {
+          return notebook.storageKind === 'directory' &&
+            !!sourceNotebook &&
+            notebook.storageRoot.toLocaleLowerCase() === sourceNotebook.storageRoot.toLocaleLowerCase();
+        }
+        return notebook.storageKind !== 'directory';
+      })
       .sort((left, right) => left.path.localeCompare(right.path, 'zh-TW', { sensitivity: 'base' }));
-  }, [notebookPickerSearch, notebooks]);
+  }, [moveNoteDialog, notebookPickerSearch, notebooks]);
   const activeViewTitle = view.kind === 'trash'
     ? '垃圾桶'
     : view.kind === 'tag'
@@ -1457,15 +1549,39 @@ export default function App() {
               </div>
               <div className="sidebar-tab-actions">
                 {sidebarTab === 'notebooks' && (
-                  <button
-                    className="icon-button sidebar-tab-action"
-                    type="button"
-                    title="新增最上層筆記本"
-                    aria-label="新增最上層筆記本"
-                    onClick={() => openCreateNotebookDialog()}
-                  >
-                    <UiIcon name="plus" />
-                  </button>
+                  <div ref={newNotebookMenuRef} className="new-notebook-picker">
+                    <button
+                      className={`icon-button sidebar-tab-action ${newNotebookMenuOpen ? 'active' : ''}`}
+                      type="button"
+                      title="新增或開啟筆記本"
+                      aria-label="新增或開啟筆記本"
+                      aria-haspopup="menu"
+                      aria-expanded={newNotebookMenuOpen}
+                      onClick={() => setNewNotebookMenuOpen((value) => !value)}
+                    >
+                      <UiIcon name="plus" />
+                    </button>
+                    {newNotebookMenuOpen && (
+                      <div className="new-notebook-menu" role="menu" aria-label="新增或開啟筆記本">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => openCreateNotebookDialog()}
+                        >
+                          <UiIcon name="folder" />
+                          <span>新增一般筆記本</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => void openManagedMarkdownNotebook()}
+                        >
+                          <UiIcon name="folder-managed" />
+                          <span>開啟 Markdown 目錄…</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {sidebarTab === 'notebooks' && (
                   <button
@@ -1489,11 +1605,14 @@ export default function App() {
                       <div
                         key={notebook.id}
                         id={`notebook-row-${notebook.id}`}
-                        className={`notebook-row ${view.kind === 'notebook' && view.id === notebook.id ? 'active' : ''} ${dropNotebookID === notebook.id ? 'drop-target' : ''}`}
+                        className={`notebook-row ${notebook.storageKind === 'directory' ? 'is-managed' : ''} ${view.kind === 'notebook' && view.id === notebook.id ? 'active' : ''} ${dropNotebookID === notebook.id ? 'drop-target' : ''}`}
                         style={{ paddingLeft: 6 + depth * 11 }}
+                        title={notebook.storageKind === 'directory' ? notebook.storageRoot : undefined}
                         onContextMenu={(event) => openNotebookContextMenu(event, notebook)}
                         onDragOver={(event) => {
                           if (!draggingNoteID) return;
+                          const draggedNote = notes.find((item) => item.id === draggingNoteID);
+                          if (!draggedNote || !canMoveNoteToNotebook(draggedNote, notebook)) return;
                           event.preventDefault();
                           event.dataTransfer.dropEffect = 'move';
                           setDropNotebookID(notebook.id);
@@ -1511,7 +1630,9 @@ export default function App() {
                           const note = notes.find((item) => item.id === noteID);
                           setDraggingNoteID('');
                           setDropNotebookID('');
-                          if (note) void moveNoteToNotebook(note, notebook.id);
+                          if (note && canMoveNoteToNotebook(note, notebook)) {
+                            void moveNoteToNotebook(note, notebook.id);
+                          }
                         }}
                       >
                         <button
@@ -1525,7 +1646,10 @@ export default function App() {
                           <UiIcon name={collapsed ? 'chevron-right' : 'chevron-down'} />
                         </button>
                         <button className="notebook-name" onClick={() => setView({ kind: 'notebook', id: notebook.id })}>
-                          <UiIcon name="folder" className="notebook-icon" />
+                          <UiIcon
+                            name={notebook.storageKind === 'directory' ? 'folder-managed' : 'folder'}
+                            className="notebook-icon"
+                          />
                           <span>{notebook.title}</span>
                         </button>
                       </div>
@@ -1788,6 +1912,8 @@ export default function App() {
                 noteID={current.id}
                 value={current.body}
                 uploadToken={bootstrap.uploadToken}
+                storageKind={current.storageKind}
+                resources={current.resources}
                 theme={theme}
                 onChange={(body) => updateDraft({ body })}
                 onBlur={() => void saveCurrent()}
@@ -1873,60 +1999,117 @@ export default function App() {
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="context-menu-title">{notebookContextMenu.notebook.title}</div>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const notebook = notebookContextMenu.notebook;
-              setNotebookContextMenu(null);
-              openChildNotebookDialog(notebook);
-            }}
-          >
-            <span>＋</span> 新增子筆記本
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const notebook = notebookContextMenu.notebook;
-              setNotebookContextMenu(null);
-              openRenameNotebookDialog(notebook);
-            }}
-          >
-            <span>✎</span> 重新命名
-          </button>
-          <div className="context-menu-separator" />
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => void importFileIntoNotebook(notebookContextMenu.notebook)}
-          >
-            <span>⇣</span> 匯入到此筆記本…
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const notebook = notebookContextMenu.notebook;
-              setNotebookContextMenu(null);
-              void exportNotebook('jex', notebook.id);
-            }}
-          >
-            <span>⇡</span> 匯出 JEX…
-          </button>
-          <div className="context-menu-separator" />
-          <button
-            type="button"
-            role="menuitem"
-            className="danger"
-            onClick={() => {
-              const notebook = notebookContextMenu.notebook;
-              setNotebookContextMenu(null);
-              void deleteNotebook(notebook);
-            }}
-          >
-            <span>×</span> 刪除筆記本
-          </button>
+          {notebookContextMenu.notebook.storageKind === 'directory' ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  openChildNotebookDialog(notebook);
+                }}
+              >
+                <UiIcon name="plus" /> 新增子資料夾
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  void refreshManagedNotebook(notebook);
+                }}
+              >
+                <UiIcon name="summary" /> 重新整理
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  void revealNotebook(notebook);
+                }}
+              >
+                <UiIcon name="folder-managed" /> 在檔案總管中顯示
+              </button>
+              {!notebookContextMenu.notebook.storagePath && (
+                <>
+                  <div className="context-menu-separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="danger"
+                    onClick={() => {
+                      const notebook = notebookContextMenu.notebook;
+                      setNotebookContextMenu(null);
+                      void deleteNotebook(notebook);
+                    }}
+                  >
+                    <UiIcon name="close" /> 停止管理此目錄
+                  </button>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  openChildNotebookDialog(notebook);
+                }}
+              >
+                <UiIcon name="plus" /> 新增子筆記本
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  openRenameNotebookDialog(notebook);
+                }}
+              >
+                <UiIcon name="settings" /> 重新命名
+              </button>
+              <div className="context-menu-separator" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void importFileIntoNotebook(notebookContextMenu.notebook)}
+              >
+                <UiIcon name="all-notes" /> 匯入到此筆記本…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  void exportNotebook('jex', notebook.id);
+                }}
+              >
+                <UiIcon name="panel-close" /> 匯出 JEX…
+              </button>
+              <div className="context-menu-separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="danger"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  void deleteNotebook(notebook);
+                }}
+              >
+                <UiIcon name="trash" /> 刪除筆記本
+              </button>
+            </>
+          )}
         </div>
       )}
 

@@ -8,6 +8,9 @@ const notebook = (id: string, parentId: string, title: string): Notebook => ({
   title,
   icon: '',
   sortOrder: 0,
+  storageKind: 'database',
+  storageRoot: '',
+  storagePath: '',
   createdAt: 0,
   updatedAt: 0,
 });

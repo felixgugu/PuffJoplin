@@ -9,6 +9,7 @@ export type UiIconName =
   | 'expand-all'
   | 'collapse-all'
   | 'folder'
+  | 'folder-managed'
   | 'summary'
   | 'locate'
   | 'pin'
@@ -75,6 +76,14 @@ export default function UiIcon({ name, filled = false, className = '' }: UiIconP
       break;
     case 'folder':
       content = <path d="M2.75 6.25h5l1.5 2h8v7.5a1.75 1.75 0 0 1-1.75 1.75H4.5a1.75 1.75 0 0 1-1.75-1.75V6.25Z" />;
+      break;
+    case 'folder-managed':
+      content = (
+        <>
+          <path d="M2.75 6.25h5l1.5 2h8v7.5a1.75 1.75 0 0 1-1.75 1.75H4.5a1.75 1.75 0 0 1-1.75-1.75V6.25Z" />
+          <path d="m12.25 11.25 1.5 1.25-1.5 1.25M10.75 14.5l2.25-4" />
+        </>
+      );
       break;
     case 'summary':
       content = (

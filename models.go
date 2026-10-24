@@ -26,13 +26,16 @@ type JoplinProfilePreview struct {
 }
 
 type Notebook struct {
-	ID        string `json:"id"`
-	ParentID  string `json:"parentId"`
-	Title     string `json:"title"`
-	Icon      string `json:"icon"`
-	SortOrder int    `json:"sortOrder"`
-	CreatedAt int64  `json:"createdAt"`
-	UpdatedAt int64  `json:"updatedAt"`
+	ID          string `json:"id"`
+	ParentID    string `json:"parentId"`
+	Title       string `json:"title"`
+	Icon        string `json:"icon"`
+	SortOrder   int    `json:"sortOrder"`
+	StorageKind string `json:"storageKind"`
+	StorageRoot string `json:"storageRoot"`
+	StoragePath string `json:"storagePath"`
+	CreatedAt   int64  `json:"createdAt"`
+	UpdatedAt   int64  `json:"updatedAt"`
 }
 
 type Tag struct {
@@ -57,11 +60,16 @@ type NoteSummary struct {
 	DeletedAt       int64    `json:"deletedAt"`
 	Tags            []string `json:"tags"`
 	AttachmentCount int      `json:"attachmentCount"`
+	StorageKind     string   `json:"storageKind"`
 }
 
 type Note struct {
 	ID            string     `json:"id"`
 	NotebookID    string     `json:"notebookId"`
+	StorageKind   string     `json:"storageKind"`
+	ExternalPath  string     `json:"externalPath"`
+	ExternalMTime int64      `json:"externalMTime"`
+	ExternalSize  int64      `json:"externalSize"`
 	Title         string     `json:"title"`
 	Body          string     `json:"body"`
 	IsTodo        bool       `json:"isTodo"`
@@ -107,15 +115,28 @@ type NotePage struct {
 }
 
 type Resource struct {
-	ID        string `json:"id"`
-	NoteID    string `json:"noteId"`
-	Title     string `json:"title"`
-	Mime      string `json:"mime"`
-	Filename  string `json:"filename"`
-	FileSize  int64  `json:"fileSize"`
-	URL       string `json:"url"`
-	CreatedAt int64  `json:"createdAt"`
-	UpdatedAt int64  `json:"updatedAt"`
+	ID           string `json:"id"`
+	NoteID       string `json:"noteId"`
+	Title        string `json:"title"`
+	Mime         string `json:"mime"`
+	Filename     string `json:"filename"`
+	FileSize     int64  `json:"fileSize"`
+	URL          string `json:"url"`
+	StorageKind  string `json:"storageKind"`
+	ExternalPath string `json:"externalPath"`
+	StoragePath  string `json:"storagePath"`
+	CreatedAt    int64  `json:"createdAt"`
+	UpdatedAt    int64  `json:"updatedAt"`
+}
+
+type ManagedDirectoryReport struct {
+	NotebookID string          `json:"notebookId"`
+	RootPath   string          `json:"rootPath"`
+	Notebooks  int             `json:"notebooks"`
+	Notes      int             `json:"notes"`
+	Resources  int             `json:"resources"`
+	Skipped    int             `json:"skipped"`
+	Warnings   []ImportWarning `json:"warnings"`
 }
 
 type ImportRequest struct {

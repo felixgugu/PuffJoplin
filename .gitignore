@@ -9,8 +9,13 @@ frontend/package.json.md5
 frontend/wailsjs/
 frontend/public/vditor/
 
-# Wails and release output
-build/
+# Wails build outputs, while keeping the standard Windows branding assets
+build/*
+!build/appicon.png
+!build/windows/
+!build/windows/icon.ico
+!build/windows/info.json
+!build/windows/wails.exe.manifest
 
 # IDE and OS
 .DS_Store

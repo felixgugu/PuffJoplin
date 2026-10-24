@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 var internalResourcePattern = regexp.MustCompile(`:/[A-Za-z0-9]{32}`)
 
@@ -110,6 +110,9 @@ func (s *Store) initialize(ctx context.Context) error {
 			title TEXT NOT NULL DEFAULT '',
 			icon TEXT NOT NULL DEFAULT '',
 			sort_order INTEGER NOT NULL DEFAULT 0,
+			storage_kind TEXT NOT NULL DEFAULT 'database',
+			storage_root TEXT NOT NULL DEFAULT '',
+			storage_path TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		)`,
@@ -127,6 +130,10 @@ func (s *Store) initialize(ctx context.Context) error {
 			is_conflict INTEGER NOT NULL DEFAULT 0,
 			is_pinned INTEGER NOT NULL DEFAULT 0,
 			sort_order INTEGER NOT NULL DEFAULT 0,
+			storage_kind TEXT NOT NULL DEFAULT 'database',
+			external_path TEXT NOT NULL DEFAULT '',
+			external_mtime INTEGER NOT NULL DEFAULT 0,
+			external_size INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
 			deleted_at INTEGER NOT NULL DEFAULT 0,
@@ -156,6 +163,8 @@ func (s *Store) initialize(ctx context.Context) error {
 			mime TEXT NOT NULL DEFAULT 'application/octet-stream',
 			filename TEXT NOT NULL DEFAULT '',
 			file_size INTEGER NOT NULL DEFAULT 0,
+			storage_kind TEXT NOT NULL DEFAULT 'database',
+			external_path TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		)`,
@@ -193,6 +202,40 @@ func (s *Store) initialize(ctx context.Context) error {
 	}
 	if err := ensureNotesPinnedColumn(ctx, tx); err != nil {
 		return err
+	}
+	for _, column := range []struct {
+		table      string
+		name       string
+		definition string
+	}{
+		{"notebooks", "storage_kind", "TEXT NOT NULL DEFAULT 'database'"},
+		{"notebooks", "storage_root", "TEXT NOT NULL DEFAULT ''"},
+		{"notebooks", "storage_path", "TEXT NOT NULL DEFAULT ''"},
+		{"notes", "storage_kind", "TEXT NOT NULL DEFAULT 'database'"},
+		{"notes", "external_path", "TEXT NOT NULL DEFAULT ''"},
+		{"notes", "external_mtime", "INTEGER NOT NULL DEFAULT 0"},
+		{"notes", "external_size", "INTEGER NOT NULL DEFAULT 0"},
+		{"resources", "storage_kind", "TEXT NOT NULL DEFAULT 'database'"},
+		{"resources", "external_path", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := ensureTableColumn(ctx, tx, column.table, column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	for _, statement := range []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS notebooks_managed_path
+		 ON notebooks(storage_root COLLATE NOCASE, storage_path COLLATE NOCASE)
+		 WHERE storage_kind = 'directory'`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS notes_external_path
+		 ON notes(external_path COLLATE NOCASE)
+		 WHERE storage_kind = 'directory' AND external_path <> ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS resources_external_path
+		 ON resources(note_id, external_path COLLATE NOCASE)
+		 WHERE storage_kind = 'directory' AND external_path <> ''`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("initialize managed directory index: %w", err)
+		}
 	}
 
 	var count int
@@ -273,8 +316,42 @@ func ensureNotesPinnedColumn(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+func ensureTableColumn(ctx context.Context, tx *sql.Tx, table string, column string, definition string) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return fmt.Errorf("read %s schema: %w", table, err)
+	}
+	found := false
+	for rows.Next() {
+		var columnID, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&columnID, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan %s schema: %w", table, err)
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
+	}
+	return nil
+}
+
 func (s *Store) normalizeStoredResourceFilenames(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, title, mime, filename FROM resources`)
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id, title, mime, filename FROM resources WHERE storage_kind = ?`,
+		storageKindDatabase,
+	)
 	if err != nil {
 		return fmt.Errorf("read resource filenames: %w", err)
 	}
@@ -336,7 +413,7 @@ func (s *Store) Bootstrap(ctx context.Context, dataDir string, joplinProfile str
 
 func (s *Store) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, parent_id, title, icon, sort_order, created_at, updated_at
+		`SELECT id, parent_id, title, icon, sort_order, storage_kind, storage_root, storage_path, created_at, updated_at
 		 FROM notebooks ORDER BY parent_id, sort_order, title COLLATE NOCASE`,
 	)
 	if err != nil {
@@ -347,7 +424,11 @@ func (s *Store) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 	items := make([]Notebook, 0)
 	for rows.Next() {
 		var item Notebook
-		if err := rows.Scan(&item.ID, &item.ParentID, &item.Title, &item.Icon, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.ParentID, &item.Title, &item.Icon, &item.SortOrder,
+			&item.StorageKind, &item.StorageRoot, &item.StoragePath,
+			&item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -361,6 +442,41 @@ func (s *Store) CreateNotebook(ctx context.Context, title string, parentID strin
 		return Notebook{}, errors.New("筆記本名稱不可為空")
 	}
 	if parentID != "" {
+		parent, err := s.getNotebook(ctx, parentID)
+		if err != nil {
+			return Notebook{}, errors.New("父筆記本不存在")
+		}
+		if parent.StorageKind == storageKindDirectory {
+			directory := managedNotebookDirectory(parent)
+			if info, err := os.Stat(directory); err != nil || !info.IsDir() {
+				return Notebook{}, errors.New("父筆記本資料夾目前無法存取")
+			}
+			name := sanitizeManagedFilename(title, "新筆記本")
+			name = uniqueManagedFilename(directory, name)
+			if err := os.Mkdir(filepath.Join(directory, name), 0o755); err != nil {
+				return Notebook{}, err
+			}
+			rootID, rootPath, err := s.managedRoot(ctx, parent)
+			if err != nil {
+				return Notebook{}, err
+			}
+			if _, err := s.reindexManagedDirectory(ctx, rootID, rootPath); err != nil {
+				return Notebook{}, err
+			}
+			relativePath := filepath.ToSlash(filepath.Join(parent.StoragePath, name))
+			var item Notebook
+			err = s.db.QueryRowContext(ctx,
+				`SELECT id, parent_id, title, icon, sort_order, storage_kind, storage_root, storage_path, created_at, updated_at
+				 FROM notebooks
+				 WHERE storage_kind = ? AND storage_root = ? COLLATE NOCASE AND storage_path = ? COLLATE NOCASE`,
+				storageKindDirectory, parent.StorageRoot, relativePath,
+			).Scan(
+				&item.ID, &item.ParentID, &item.Title, &item.Icon, &item.SortOrder,
+				&item.StorageKind, &item.StorageRoot, &item.StoragePath,
+				&item.CreatedAt, &item.UpdatedAt,
+			)
+			return item, err
+		}
 		var exists int
 		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notebooks WHERE id = ?`, parentID).Scan(&exists); err != nil {
 			return Notebook{}, err
@@ -370,7 +486,10 @@ func (s *Store) CreateNotebook(ctx context.Context, title string, parentID strin
 		}
 	}
 	now := nowMillis()
-	item := Notebook{ID: newID(), ParentID: parentID, Title: title, CreatedAt: now, UpdatedAt: now}
+	item := Notebook{
+		ID: newID(), ParentID: parentID, Title: title, StorageKind: storageKindDatabase,
+		CreatedAt: now, UpdatedAt: now,
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO notebooks(id, parent_id, title, icon, sort_order, created_at, updated_at)
 		 VALUES(?, ?, ?, '', 0, ?, ?)`,
@@ -384,6 +503,13 @@ func (s *Store) RenameNotebook(ctx context.Context, id string, title string) (No
 	if title == "" {
 		return Notebook{}, errors.New("筆記本名稱不可為空")
 	}
+	notebook, err := s.getNotebook(ctx, id)
+	if err != nil {
+		return Notebook{}, errors.New("筆記本不存在")
+	}
+	if notebook.StorageKind == storageKindDirectory {
+		return Notebook{}, errors.New("直接管理的資料夾名稱由檔案系統決定")
+	}
 	now := nowMillis()
 	result, err := s.db.ExecContext(ctx, `UPDATE notebooks SET title = ?, updated_at = ? WHERE id = ?`, title, now, id)
 	if err != nil {
@@ -396,6 +522,13 @@ func (s *Store) RenameNotebook(ctx context.Context, id string, title string) (No
 }
 
 func (s *Store) DeleteNotebook(ctx context.Context, id string, deleteChildren bool) error {
+	notebook, err := s.getNotebook(ctx, id)
+	if err != nil {
+		return errors.New("筆記本不存在")
+	}
+	if notebook.StorageKind == storageKindDirectory {
+		return s.unregisterManagedDirectory(ctx, notebook)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -556,9 +689,14 @@ func (s *Store) deleteNotesInNotebooks(ctx context.Context, tx *sql.Tx, notebook
 func (s *Store) getNotebook(ctx context.Context, id string) (Notebook, error) {
 	var item Notebook
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, parent_id, title, icon, sort_order, created_at, updated_at FROM notebooks WHERE id = ?`,
+		`SELECT id, parent_id, title, icon, sort_order, storage_kind, storage_root, storage_path, created_at, updated_at
+		 FROM notebooks WHERE id = ?`,
 		id,
-	).Scan(&item.ID, &item.ParentID, &item.Title, &item.Icon, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt)
+	).Scan(
+		&item.ID, &item.ParentID, &item.Title, &item.Icon, &item.SortOrder,
+		&item.StorageKind, &item.StorageRoot, &item.StoragePath,
+		&item.CreatedAt, &item.UpdatedAt,
+	)
 	return item, err
 }
 
@@ -627,7 +765,8 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT n.id, n.notebook_id, f.title, n.title, n.body, n.is_todo, n.todo_due,
 		        n.todo_completed, n.is_conflict, n.is_pinned, n.created_at, n.updated_at, n.deleted_at,
-		        (SELECT COUNT(*) FROM resources r WHERE r.note_id = n.id) AS attachment_count
+		        (SELECT COUNT(*) FROM resources r WHERE r.note_id = n.id) AS attachment_count,
+		        n.storage_kind
 		 FROM notes n
 		 JOIN notebooks f ON f.id = n.notebook_id
 		 WHERE `+whereSQL+`
@@ -649,6 +788,7 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 			&item.ID, &item.NotebookID, &item.NotebookTitle, &item.Title, &body,
 			&isTodo, &item.TodoDue, &item.TodoCompleted, &isConflict, &isPinned,
 			&item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.AttachmentCount,
+			&item.StorageKind,
 		); err != nil {
 			return NotePage{}, err
 		}
@@ -686,13 +826,16 @@ func (s *Store) GetNote(ctx context.Context, id string) (Note, error) {
 	var note Note
 	var isTodo, isConflict, isPinned int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, notebook_id, title, body, is_todo, todo_due, todo_completed, source_url,
-		        author, is_conflict, is_pinned, created_at, updated_at, deleted_at
+		`SELECT id, notebook_id, storage_kind, external_path, title, body, is_todo, todo_due,
+		        todo_completed, source_url, author, is_conflict, is_pinned, external_mtime,
+		        external_size, created_at, updated_at, deleted_at
 		 FROM notes WHERE id = ?`,
 		id,
 	).Scan(
-		&note.ID, &note.NotebookID, &note.Title, &note.Body, &isTodo, &note.TodoDue,
-		&note.TodoCompleted, &note.SourceURL, &note.Author, &isConflict, &isPinned,
+		&note.ID, &note.NotebookID, &note.StorageKind, &note.ExternalPath,
+		&note.Title, &note.Body, &isTodo, &note.TodoDue, &note.TodoCompleted,
+		&note.SourceURL, &note.Author, &isConflict, &isPinned,
+		&note.ExternalMTime, &note.ExternalSize,
 		&note.CreatedAt, &note.UpdatedAt, &note.DeletedAt,
 	)
 	if err != nil {
@@ -701,6 +844,12 @@ func (s *Store) GetNote(ctx context.Context, id string) (Note, error) {
 	note.IsTodo = isTodo != 0
 	note.IsConflict = isConflict != 0
 	note.IsPinned = isPinned != 0
+	if note.StorageKind == storageKindDirectory {
+		note, err = s.refreshManagedNote(ctx, note)
+		if err != nil {
+			return note, err
+		}
+	}
 	note.Tags, err = s.noteTags(ctx, id)
 	if err != nil {
 		return note, err
@@ -716,8 +865,12 @@ func (s *Store) CreateNote(ctx context.Context, notebookID string, title string,
 			return Note{}, fmt.Errorf("find notebook: %w", err)
 		}
 	}
-	if _, err := s.getNotebook(ctx, notebookID); err != nil {
+	notebook, err := s.getNotebook(ctx, notebookID)
+	if err != nil {
 		return Note{}, errors.New("筆記本不存在")
+	}
+	if notebook.StorageKind == storageKindDirectory {
+		return s.createManagedNote(ctx, notebook, title, body)
 	}
 	now := nowMillis()
 	if strings.TrimSpace(title) == "" {
@@ -768,6 +921,26 @@ func (s *Store) UpdateNote(ctx context.Context, input NoteInput) (Note, error) {
 	if _, err := s.getNotebook(ctx, input.NotebookID); err != nil {
 		return Note{}, errors.New("筆記本不存在")
 	}
+	var storedNotebookID, existingStorageKind, existingExternalPath, existingTitle, existingBody string
+	var existingMTime, existingSize int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT notebook_id, storage_kind, external_path, title, body, external_mtime, external_size
+		 FROM notes WHERE id = ?`,
+		input.ID,
+	).Scan(
+		&storedNotebookID, &existingStorageKind, &existingExternalPath,
+		&existingTitle, &existingBody, &existingMTime, &existingSize,
+	)
+	if err != nil {
+		return Note{}, errors.New("筆記不存在")
+	}
+	if existingStorageKind == storageKindDirectory {
+		return s.updateManagedNote(ctx, Note{
+			ID: input.ID, NotebookID: storedNotebookID, StorageKind: existingStorageKind,
+			ExternalPath: existingExternalPath, Title: existingTitle, Body: existingBody,
+			ExternalMTime: existingMTime, ExternalSize: existingSize,
+		}, input)
+	}
 	now := nowMillis()
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
@@ -811,8 +984,19 @@ func boolInt(value bool) int {
 }
 
 func (s *Store) MoveNote(ctx context.Context, id string, notebookID string) (Note, error) {
-	if _, err := s.getNotebook(ctx, notebookID); err != nil {
+	notebook, err := s.getNotebook(ctx, notebookID)
+	if err != nil {
 		return Note{}, errors.New("筆記本不存在")
+	}
+	note, err := s.GetNote(ctx, id)
+	if err != nil {
+		return Note{}, errors.New("筆記不存在")
+	}
+	if note.StorageKind == storageKindDirectory || notebook.StorageKind == storageKindDirectory {
+		if note.StorageKind != storageKindDirectory || notebook.StorageKind != storageKindDirectory {
+			return Note{}, errors.New("不支援一般筆記與直接管理筆記之間的移動")
+		}
+		return s.moveManagedNote(ctx, note, notebook)
 	}
 	now := nowMillis()
 	result, err := s.db.ExecContext(ctx, `UPDATE notes SET notebook_id = ?, updated_at = ? WHERE id = ?`, notebookID, now, id)
@@ -837,6 +1021,13 @@ func (s *Store) SetNotePinned(ctx context.Context, id string, pinned bool) error
 }
 
 func (s *Store) TrashNote(ctx context.Context, id string) error {
+	note, err := s.GetNote(ctx, id)
+	if err != nil {
+		return errors.New("筆記不存在")
+	}
+	if note.StorageKind == storageKindDirectory {
+		return s.recycleManagedNote(ctx, note)
+	}
 	now := nowMillis()
 	result, err := s.db.ExecContext(ctx, `UPDATE notes SET deleted_at = ?, updated_at = ? WHERE id = ?`, now, now, id)
 	if err != nil {
@@ -855,6 +1046,10 @@ func (s *Store) RestoreNote(ctx context.Context, id string) error {
 }
 
 func (s *Store) DeleteNotePermanently(ctx context.Context, id string) error {
+	note, noteErr := s.GetNote(ctx, id)
+	if noteErr == nil && note.StorageKind == storageKindDirectory {
+		return s.recycleManagedNote(ctx, note)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -904,7 +1099,7 @@ func (s *Store) SearchNotes(ctx context.Context, search string, limit int) ([]No
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT n.id, n.notebook_id, f.title, n.title, n.body, n.is_todo, n.todo_due,
 		        n.todo_completed, n.is_conflict, n.is_pinned, n.created_at, n.updated_at, n.deleted_at,
-		        (SELECT COUNT(*) FROM resources r WHERE r.note_id = n.id)
+		        (SELECT COUNT(*) FROM resources r WHERE r.note_id = n.id), n.storage_kind
 		 FROM notes_fts
 		 JOIN notes n ON n.id = notes_fts.note_id
 		 JOIN notebooks f ON f.id = n.notebook_id
@@ -926,6 +1121,7 @@ func (s *Store) SearchNotes(ctx context.Context, search string, limit int) ([]No
 			&item.ID, &item.NotebookID, &item.NotebookTitle, &item.Title, &body,
 			&isTodo, &item.TodoDue, &item.TodoCompleted, &isConflict, &isPinned,
 			&item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.AttachmentCount,
+			&item.StorageKind,
 		); err != nil {
 			return nil, err
 		}
@@ -1042,7 +1238,7 @@ func (s *Store) SetNoteTags(ctx context.Context, noteID string, tagTitles []stri
 
 func (s *Store) noteResources(ctx context.Context, noteID string) ([]Resource, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, note_id, title, mime, filename, file_size, created_at, updated_at
+		`SELECT id, note_id, title, mime, filename, file_size, storage_kind, external_path, created_at, updated_at
 		 FROM resources WHERE note_id = ? ORDER BY created_at`,
 		noteID,
 	)
@@ -1053,11 +1249,16 @@ func (s *Store) noteResources(ctx context.Context, noteID string) ([]Resource, e
 	items := make([]Resource, 0)
 	for rows.Next() {
 		var item Resource
-		if err := rows.Scan(&item.ID, &item.NoteID, &item.Title, &item.Mime, &item.Filename, &item.FileSize, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.NoteID, &item.Title, &item.Mime, &item.Filename,
+			&item.FileSize, &item.StorageKind, &item.ExternalPath,
+			&item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		item.Filename = normalizeResourceFilename(item.Filename, item.Title, item.Mime, "")
 		item.URL = "/resources/" + item.ID
+		item.StoragePath = s.resourceStoragePath(item, noteID)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -1078,6 +1279,9 @@ func (s *Store) AddResource(ctx context.Context, noteID string, sourcePath strin
 	if err != nil {
 		return Resource{}, err
 	}
+	if note.StorageKind == storageKindDirectory {
+		return s.addManagedResourceFile(ctx, note, sourcePath)
+	}
 	id := newID()
 	mime := detectMime(sourcePath)
 	title := strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))
@@ -1089,7 +1293,8 @@ func (s *Store) AddResource(ctx context.Context, noteID string, sourcePath strin
 	now := nowMillis()
 	item := Resource{
 		ID: id, NoteID: noteID, Title: title, Mime: mime, Filename: filepath.Base(sourcePath),
-		FileSize: stat.Size(), URL: "/resources/" + id, CreatedAt: now, UpdatedAt: now,
+		FileSize: stat.Size(), URL: "/resources/" + id, StorageKind: storageKindDatabase,
+		CreatedAt: now, UpdatedAt: now,
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO resources(id, note_id, title, mime, filename, file_size, created_at, updated_at)
@@ -1110,8 +1315,12 @@ func (s *Store) AddResourceData(ctx context.Context, noteID string, filename str
 	if len(data) > maxUploadFileBytes {
 		return Resource{}, errors.New("附件不可超過 50 MB")
 	}
-	if _, err := s.GetNote(ctx, noteID); err != nil {
+	note, err := s.GetNote(ctx, noteID)
+	if err != nil {
 		return Resource{}, errors.New("筆記不存在")
+	}
+	if note.StorageKind == storageKindDirectory {
+		return s.addManagedResourceData(ctx, note, filename, data)
 	}
 	filename = filepath.Base(strings.ReplaceAll(strings.TrimSpace(filename), `\`, "/"))
 	if filename == "." || filename == "" {
@@ -1152,7 +1361,7 @@ func (s *Store) AddResourceData(ctx context.Context, noteID string, filename str
 	item := Resource{
 		ID: id, NoteID: noteID, Title: strings.TrimSuffix(filename, filepath.Ext(filename)),
 		Mime: detectMimeData(filename, data), Filename: filename, FileSize: int64(len(data)),
-		URL: "/resources/" + id, CreatedAt: now, UpdatedAt: now,
+		URL: "/resources/" + id, StorageKind: storageKindDatabase, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO resources(id, note_id, title, mime, filename, file_size, created_at, updated_at)
@@ -1168,16 +1377,35 @@ func (s *Store) AddResourceData(ctx context.Context, noteID string, filename str
 func (s *Store) Resource(ctx context.Context, id string) (Resource, error) {
 	var item Resource
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, note_id, title, mime, filename, file_size, created_at, updated_at
+		`SELECT id, note_id, title, mime, filename, file_size, storage_kind, external_path, created_at, updated_at
 		 FROM resources WHERE id = ?`,
 		id,
-	).Scan(&item.ID, &item.NoteID, &item.Title, &item.Mime, &item.Filename, &item.FileSize, &item.CreatedAt, &item.UpdatedAt)
+	).Scan(
+		&item.ID, &item.NoteID, &item.Title, &item.Mime, &item.Filename, &item.FileSize,
+		&item.StorageKind, &item.ExternalPath, &item.CreatedAt, &item.UpdatedAt,
+	)
 	if err != nil {
 		return item, err
 	}
 	item.Filename = normalizeResourceFilename(item.Filename, item.Title, item.Mime, "")
 	item.URL = "/resources/" + item.ID
+	item.StoragePath = s.resourceStoragePath(item, item.NoteID)
 	return item, nil
+}
+
+func (s *Store) resourceStoragePath(resource Resource, noteID string) string {
+	if resource.StorageKind != storageKindDirectory || resource.ExternalPath == "" {
+		return ""
+	}
+	var notePath string
+	if err := s.db.QueryRow(`SELECT external_path FROM notes WHERE id = ?`, noteID).Scan(&notePath); err != nil {
+		return ""
+	}
+	relative, err := filepath.Rel(filepath.Dir(notePath), resource.ExternalPath)
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(relative)
 }
 
 func (s *Store) resourcePath(id string) string {
@@ -1185,6 +1413,13 @@ func (s *Store) resourcePath(id string) string {
 		return ""
 	}
 	return filepath.Join(s.resourcesDir, id)
+}
+
+func (s *Store) storedResourcePath(resource Resource) string {
+	if resource.StorageKind == storageKindDirectory && resource.ExternalPath != "" {
+		return resource.ExternalPath
+	}
+	return s.resourcePath(resource.ID)
 }
 
 func (s *Store) GetSetting(ctx context.Context, key string) (string, bool, error) {

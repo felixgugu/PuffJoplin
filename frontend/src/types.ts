@@ -29,6 +29,9 @@ export interface Notebook {
   title: string;
   icon: string;
   sortOrder: number;
+  storageKind: 'database' | 'directory';
+  storageRoot: string;
+  storagePath: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -55,6 +58,7 @@ export interface NoteSummary {
   deletedAt: number;
   tags: string[];
   attachmentCount: number;
+  storageKind: 'database' | 'directory';
 }
 
 export interface Resource {
@@ -65,6 +69,9 @@ export interface Resource {
   filename: string;
   fileSize: number;
   url: string;
+  storageKind: 'database' | 'directory';
+  externalPath: string;
+  storagePath: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -72,6 +79,10 @@ export interface Resource {
 export interface Note {
   id: string;
   notebookId: string;
+  storageKind: 'database' | 'directory';
+  externalPath: string;
+  externalMTime: number;
+  externalSize: number;
   title: string;
   body: string;
   isTodo: boolean;
@@ -144,6 +155,16 @@ export interface ImportReport {
   warnings: ImportWarning[];
   encryptedSkipped: string[];
   destinationFolder: string;
+}
+
+export interface ManagedDirectoryReport {
+  notebookId: string;
+  rootPath: string;
+  notebooks: number;
+  notes: number;
+  resources: number;
+  skipped: number;
+  warnings: ImportWarning[];
 }
 
 export type View =

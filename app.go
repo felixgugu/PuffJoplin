@@ -21,25 +21,28 @@ import (
 )
 
 type App struct {
-	ctx          context.Context
-	store        *Store
-	instanceLock *InstanceLock
-	dataDir      string
-	logsDir      string
-	resourcesDir string
-	uploadToken  string
-	initErr      error
-	logger       *log.Logger
-	logFile      *os.File
-	mu           sync.Mutex
+	ctx             context.Context
+	store           *Store
+	instanceLock    *InstanceLock
+	dataDir         string
+	logsDir         string
+	resourcesDir    string
+	uploadToken     string
+	initErr         error
+	logger          *log.Logger
+	logFile         *os.File
+	mu              sync.Mutex
+	managedMu       sync.Mutex
+	managedWatchers map[string]*managedRootWatcher
 }
 
 func NewApp() *App {
 	dataDir := resolveDataDir()
 	app := &App{
-		dataDir:      dataDir,
-		logsDir:      filepath.Join(dataDir, "logs"),
-		resourcesDir: filepath.Join(dataDir, "resources"),
+		dataDir:         dataDir,
+		logsDir:         filepath.Join(dataDir, "logs"),
+		resourcesDir:    filepath.Join(dataDir, "resources"),
+		managedWatchers: make(map[string]*managedRootWatcher),
 	}
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
@@ -113,7 +116,9 @@ func (a *App) OnStartup(ctx context.Context) {
 	a.ctx = ctx
 	if a.initErr != nil {
 		runtime.EventsEmit(ctx, "app.error", a.initErr.Error())
+		return
 	}
+	a.startManagedWatchers()
 }
 
 func (a *App) SetWindowTheme(theme string) {
@@ -140,6 +145,7 @@ func (a *App) ReportFrontendError(message string, stack string, source string) e
 }
 
 func (a *App) OnShutdown(context.Context) {
+	a.stopManagedWatchers()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.store != nil {
@@ -252,6 +258,9 @@ func (a *App) CreateNotebook(title string, parentID string) (Notebook, error) {
 	item, err := store.CreateNotebook(a.ctx, title, parentID)
 	if err == nil {
 		runtime.EventsEmit(a.ctx, "notebooks.changed", item.ID)
+		if item.StorageKind == storageKindDirectory {
+			runtime.EventsEmit(a.ctx, "notes.changed", "")
+		}
 	}
 	return item, err
 }
@@ -273,8 +282,15 @@ func (a *App) DeleteNotebook(id string, deleteChildren bool) error {
 	if err != nil {
 		return err
 	}
+	notebook, err := store.getNotebook(a.ctx, id)
+	if err != nil {
+		return errors.New("筆記本不存在")
+	}
 	if err := store.DeleteNotebook(a.ctx, id, deleteChildren); err != nil {
 		return err
+	}
+	if notebook.StorageKind == storageKindDirectory && notebook.StoragePath == "" {
+		a.stopManagedWatcher(id)
 	}
 	runtime.EventsEmit(a.ctx, "notebooks.changed", id)
 	runtime.EventsEmit(a.ctx, "notes.changed", "")
@@ -629,9 +645,9 @@ func (a *App) AttachResource(noteID string) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
-	link := fmt.Sprintf("\n\n[%s](:/%s)\n", resource.Title, resource.ID)
+	link := fmt.Sprintf("\n\n[%s](%s)\n", resource.Title, resource.URL)
 	if strings.HasPrefix(resource.Mime, "image/") {
-		link = fmt.Sprintf("\n\n![%s](:/%s)\n", resource.Title, resource.ID)
+		link = fmt.Sprintf("\n\n![%s](%s)\n", resource.Title, resource.URL)
 	}
 	input := noteInputFromNote(note)
 	input.Body += link
@@ -678,7 +694,7 @@ func (a *App) OpenResource(id string) error {
 	if err != nil {
 		return err
 	}
-	path := store.resourcePath(resource.ID)
+	path := store.storedResourcePath(resource)
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}
@@ -697,7 +713,7 @@ func (a *App) RevealResource(id string) error {
 	if err != nil {
 		return err
 	}
-	path := store.resourcePath(resource.ID)
+	path := store.storedResourcePath(resource)
 	return exec.Command("explorer.exe", "/select,", path).Start()
 }
 
@@ -717,7 +733,7 @@ func (a *App) SaveResourceAs(id string) (string, error) {
 	if err != nil || path == "" {
 		return path, err
 	}
-	if err := copyFile(store.resourcePath(resource.ID), path); err != nil {
+	if err := copyFile(store.storedResourcePath(resource), path); err != nil {
 		return "", err
 	}
 	return path, nil

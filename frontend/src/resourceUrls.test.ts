@@ -25,4 +25,24 @@ describe('resource URL conversion', () => {
     expect(toEditorMarkdown(markdown)).toBe(markdown);
     expect(toStoredMarkdown(markdown)).toBe(markdown);
   });
+
+  it('maps managed directory images to resource URLs without changing disk paths', () => {
+    const resources = [{
+      id,
+      storageKind: 'directory' as const,
+      storagePath: 'images/photo 1.png',
+    }];
+    const stored = `![photo](images/photo 1.png) ![encoded](images/photo%201.png) ![relative](./images/photo%201.png)`;
+    const editor = `![photo](/resources/${id}) ![encoded](/resources/${id}) ![relative](/resources/${id})`;
+
+    expect(toEditorMarkdown(stored, resources)).toBe(editor);
+    expect(toStoredMarkdown(editor, resources, 'directory')).toBe(
+      `![photo](images/photo%201.png) ![encoded](images/photo%201.png) ![relative](images/photo%201.png)`,
+    );
+  });
+
+  it('keeps newly uploaded managed resource URLs until the backend persists them', () => {
+    const markdown = `![pasted](/resources/${id})`;
+    expect(toStoredMarkdown(markdown, [], 'directory')).toBe(markdown);
+  });
 });

@@ -4268,6 +4268,47 @@ textarea,
   white-space: nowrap;
 }
 
+.new-notebook-picker {
+  position: relative;
+  flex: none;
+}
+
+.new-notebook-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 224px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel-strong) 96%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(28px) saturate(1.18);
+  animation: fluent-menu-in 120ms var(--ease);
+}
+
+.new-notebook-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 1rem;
+  text-align: left;
+}
+
+.new-notebook-menu button:hover {
+  background: var(--surface-hover);
+}
+
+.notebook-row.is-managed .notebook-icon {
+  color: var(--accent);
+}
+
 /* Vditor fullscreen must escape the editor panel's containment and stacking context. */
 :is(html[data-vditor-fullscreen="true"], html:has(.vditor--fullscreen)) body {
   overflow: hidden;

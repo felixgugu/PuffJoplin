@@ -2,6 +2,7 @@ import type {
   BootstrapState,
   ImportReport,
   JoplinProfilePreview,
+  ManagedDirectoryReport,
   Note,
   NoteExportRequest,
   NoteInput,
@@ -70,6 +71,10 @@ export const api = {
   },
   closeWindow: () => windowRuntime()?.Quit(),
   listNotebooks: () => invoke<Notebook[]>('ListNotebooks'),
+  openManagedMarkdownNotebook: () => invoke<ManagedDirectoryReport>('OpenManagedMarkdownNotebook'),
+  refreshManagedNotebook: (notebookId: string) =>
+    invoke<ManagedDirectoryReport>('RefreshManagedNotebook', notebookId),
+  revealNotebook: (notebookId: string) => invoke<void>('RevealNotebook', notebookId),
   createNotebook: (title: string, parentId = '') => invoke<Notebook>('CreateNotebook', title, parentId),
   renameNotebook: (id: string, title: string) => invoke<Notebook>('RenameNotebook', id, title),
   deleteNotebook: (id: string, deleteChildren: boolean) => invoke<void>('DeleteNotebook', id, deleteChildren),

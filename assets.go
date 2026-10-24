@@ -150,14 +150,14 @@ func (a *App) ServeResources(w http.ResponseWriter, r *http.Request) bool {
 	if a.store != nil {
 		resource, err := a.store.Resource(r.Context(), id)
 		if err == nil {
-			path := a.store.resourcePath(resource.ID)
+			path := a.store.storedResourcePath(resource)
 			if stat, statErr := os.Stat(path); statErr == nil && !stat.IsDir() {
 				if contentType := mime.TypeByExtension(filepath.Ext(resource.Filename)); contentType != "" {
 					w.Header().Set("Content-Type", contentType)
 				} else if resource.Mime != "" {
 					w.Header().Set("Content-Type", resource.Mime)
 				}
-				w.Header().Set("Cache-Control", "private, max-age=3600")
+				w.Header().Set("Cache-Control", "private, no-cache")
 				http.ServeFile(w, r, path)
 				return true
 			}

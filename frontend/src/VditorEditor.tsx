@@ -9,6 +9,7 @@ import 'vditor/dist/index.css';
 import { api } from './api';
 import { installDiagramGuards } from './diagramGuards';
 import { toEditorMarkdown, toStoredMarkdown } from './resourceUrls';
+import type { Resource } from './types';
 
 const vditorRoot = '/vditor/dist';
 const contentThemePath = `${vditorRoot}/css/content-theme`;
@@ -43,15 +44,17 @@ function clipboardHasImage(event: ClipboardEvent): boolean {
   ) || Array.from(data.files).some((file) => file.type.startsWith('image/'));
 }
 
-function clipboardImageMarkdown(resource: { filename: string; id: string }): string {
+function clipboardImageMarkdown(resource: Resource): string {
   const name = resource.filename.replace(/[\\[\]]/g, '\\$&');
-  return `![${name}](/resources/${resource.id})`;
+  return `![${name}](${resource.url})`;
 }
 
 interface VditorEditorProps {
   noteID: string;
   value: string;
   uploadToken: string;
+  storageKind: 'database' | 'directory';
+  resources: Resource[];
   theme: 'light' | 'dark';
   onChange: (value: string) => void;
   onBlur: () => void;
@@ -65,6 +68,8 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   noteID,
   value,
   uploadToken,
+  storageKind,
+  resources,
   theme,
   onChange,
   onBlur,
@@ -77,10 +82,18 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
   const pastingRef = useRef(false);
+  const storageKindRef = useRef(storageKind);
+  const resourcesRef = useRef(resources);
+  const valueRef = useRef(value);
+  const lastValueRef = useRef(value);
+  const applyingExternalValueRef = useRef(false);
 
   themeRef.current = theme;
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
+  storageKindRef.current = storageKind;
+  resourcesRef.current = resources;
+  valueRef.current = value;
 
   useImperativeHandle(ref, () => ({
     getHTML: () => {
@@ -137,7 +150,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       height: '100%',
       width: '100%',
       minHeight: 320,
-      value: toEditorMarkdown(initialValueRef.current),
+      value: toEditorMarkdown(initialValueRef.current, resourcesRef.current),
       mode: 'ir',
       lang: 'zh_TW',
       icon: 'material',
@@ -250,10 +263,27 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         if (disposed) return;
         readyRef.current = true;
         applyEditorTheme(editor, themeRef.current);
+        const currentValue = toEditorMarkdown(valueRef.current, resourcesRef.current);
+        if (currentValue !== toEditorMarkdown(initialValueRef.current, resourcesRef.current)) {
+          applyingExternalValueRef.current = true;
+          editor.setValue(currentValue, true);
+          window.requestAnimationFrame(() => {
+            applyingExternalValueRef.current = false;
+          });
+        }
+        lastValueRef.current = valueRef.current;
       },
       input: (markdown) => {
         if (!disposed && readyRef.current) {
-          onChangeRef.current(toStoredMarkdown(markdown));
+          const stored = toStoredMarkdown(
+            markdown,
+            resourcesRef.current,
+            storageKindRef.current,
+          );
+          lastValueRef.current = stored;
+          if (!applyingExternalValueRef.current) {
+            onChangeRef.current(stored);
+          }
         }
       },
       blur: () => {
@@ -310,6 +340,19 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     if (!editor) return;
     applyEditorTheme(editor, theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (value === lastValueRef.current) return undefined;
+    const editor = editorRef.current;
+    if (!editor || !readyRef.current) return undefined;
+    applyingExternalValueRef.current = true;
+    editor.setValue(toEditorMarkdown(value, resources), true);
+    lastValueRef.current = value;
+    const frame = window.requestAnimationFrame(() => {
+      applyingExternalValueRef.current = false;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [resources, value]);
 
   return <div ref={hostRef} className="vditor-editor-host" aria-label="Markdown 編輯器" />;
 });

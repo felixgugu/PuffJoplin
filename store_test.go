@@ -366,6 +366,32 @@ func TestOpenStoreMigratesPinnedColumn(t *testing.T) {
 	if pinned != 1 {
 		t.Fatal("is_pinned column was not added")
 	}
+	for _, column := range []struct {
+		table string
+		name  string
+	}{
+		{"notebooks", "storage_kind"},
+		{"notebooks", "storage_root"},
+		{"notebooks", "storage_path"},
+		{"notes", "storage_kind"},
+		{"notes", "external_path"},
+		{"notes", "external_mtime"},
+		{"notes", "external_size"},
+		{"resources", "storage_kind"},
+		{"resources", "external_path"},
+	} {
+		var found int
+		if err := store.db.QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`,
+			column.table,
+			column.name,
+		).Scan(&found); err != nil {
+			t.Fatal(err)
+		}
+		if found != 1 {
+			t.Errorf("%s.%s column was not added", column.table, column.name)
+		}
+	}
 }
 
 func TestStoreAttachResource(t *testing.T) {
