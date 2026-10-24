@@ -546,7 +546,20 @@ func (a *App) ExportNotebook(notebookID string, format string) (string, error) {
 	if format != "jex" && format != "md" {
 		return "", errors.New("不支援的匯出格式")
 	}
-	extension := "." + format
+	if format == "md" {
+		path, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+			Title:                "選擇 Markdown 匯出目錄",
+			CanCreateDirectories: true,
+		})
+		if err != nil || path == "" {
+			return path, err
+		}
+		if err := exportMarkdown(a.ctx, store, notebookID, path); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	extension := ".jex"
 	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "匯出筆記本",
 		DefaultFilename: "PuffJoplin-Export" + extension,
@@ -560,11 +573,7 @@ func (a *App) ExportNotebook(notebookID string, format string) (string, error) {
 	if !strings.HasSuffix(strings.ToLower(path), extension) {
 		path += extension
 	}
-	if format == "jex" {
-		err = exportJEX(a.ctx, store, notebookID, path)
-	} else {
-		err = exportMarkdown(a.ctx, store, notebookID, path)
-	}
+	err = exportJEX(a.ctx, store, notebookID, path)
 	return path, err
 }
 

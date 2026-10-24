@@ -8,6 +8,7 @@ import {
   type FormEvent,
 } from 'react';
 import { api, onEvent } from './api';
+import { convertNotebookMarkdownToDocx } from './docxExport';
 import EditorTabBar from './EditorTabBar';
 import {
   activateEditorTab as activateEditorTabState,
@@ -1066,7 +1067,7 @@ export default function App() {
   }, [notify, refreshNotes, refreshTaxonomy]);
 
   const exportNotebook = useCallback(async (
-    format: 'jex' | 'md',
+    format: 'jex' | 'md' | 'docx',
     notebookID = activeNotebookId,
   ) => {
     if (!notebookID) {
@@ -1074,12 +1075,31 @@ export default function App() {
       return;
     }
     try {
-      const path = await api.exportNotebook(notebookID, format);
+      let path = '';
+      if (format === 'docx') {
+        const notebook = notebooks.find((item) => item.id === notebookID);
+        notify('正在準備 DOCX…');
+        const prepared = await api.prepareNotebookDocx(notebookID);
+        if (!prepared.path) return;
+        const dataBase64 = await convertNotebookMarkdownToDocx(
+          prepared.markdown,
+          notebook?.title || prepared.defaultFilename,
+        );
+        await api.saveDocxExport(prepared.path, dataBase64);
+        path = prepared.path;
+      } else {
+        path = await api.exportNotebook(notebookID, format);
+      }
       if (path) notify(`已匯出至 ${path}`);
     } catch (error) {
-      notify(`匯出失敗：${errorMessage(error)}`);
+      const message = errorMessage(error);
+      if (format === 'docx') {
+        const stack = error instanceof Error ? error.stack || '' : '';
+        void api.reportFrontendError(`DOCX export failed: ${message}`, stack, 'docx-export');
+      }
+      notify(`匯出失敗：${message}`);
     }
-  }, [activeNotebookId, notify]);
+  }, [activeNotebookId, notebooks, notify]);
 
   const exportCurrentNote = useCallback(async (format: NoteExportFormat) => {
     setExportMenuOpen(false);
@@ -1994,7 +2014,7 @@ export default function App() {
           aria-label={`${notebookContextMenu.notebook.title} 操作`}
           style={{
             left: Math.max(8, Math.min(notebookContextMenu.x, window.innerWidth - 224)),
-            top: Math.max(8, Math.min(notebookContextMenu.y, window.innerHeight - 244)),
+            top: Math.max(8, Math.min(notebookContextMenu.y, window.innerHeight - 360)),
           }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -2033,6 +2053,29 @@ export default function App() {
                 }}
               >
                 <UiIcon name="folder-managed" /> 在檔案總管中顯示
+              </button>
+              <div className="context-menu-separator" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  void exportNotebook('md', notebook.id);
+                }}
+              >
+                <UiIcon name="folder" /> 匯出 Markdown 目錄…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  void exportNotebook('docx', notebook.id);
+                }}
+              >
+                <UiIcon name="all-notes" /> 匯出 DOCX…
               </button>
               {!notebookContextMenu.notebook.storagePath && (
                 <>
@@ -2094,6 +2137,28 @@ export default function App() {
                 }}
               >
                 <UiIcon name="panel-close" /> 匯出 JEX…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  void exportNotebook('md', notebook.id);
+                }}
+              >
+                <UiIcon name="folder" /> 匯出 Markdown 目錄…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const notebook = notebookContextMenu.notebook;
+                  setNotebookContextMenu(null);
+                  void exportNotebook('docx', notebook.id);
+                }}
+              >
+                <UiIcon name="all-notes" /> 匯出 DOCX…
               </button>
               <div className="context-menu-separator" />
               <button

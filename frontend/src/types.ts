@@ -167,6 +167,12 @@ export interface ManagedDirectoryReport {
   warnings: ImportWarning[];
 }
 
+export interface NotebookDocxExport {
+  path: string;
+  defaultFilename: string;
+  markdown: string;
+}
+
 export type View =
   | { kind: 'all' }
   | { kind: 'trash' }

@@ -166,3 +166,9 @@ type NoteExportRequest struct {
 	Format string `json:"format"`
 	HTML   string `json:"html"`
 }
+
+type NotebookDocxExport struct {
+	Path            string `json:"path"`
+	DefaultFilename string `json:"defaultFilename"`
+	Markdown        string `json:"markdown"`
+}

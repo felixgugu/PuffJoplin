@@ -259,12 +259,11 @@ func TestJEXRoundTrip(t *testing.T) {
 		t.Fatalf("JEX root notebook was not nested under destination: %#v", importedNotebooks)
 	}
 
-	markdownTarget := filepath.Join(t.TempDir(), "markdown-export.md")
-	if err := exportMarkdown(ctx, source, notebooks[0].ID, markdownTarget); err != nil {
+	markdownDir := filepath.Join(t.TempDir(), "markdown-export")
+	if err := exportMarkdown(ctx, source, notebooks[0].ID, markdownDir); err != nil {
 		t.Fatalf("export Markdown: %v", err)
 	}
-	markdownDir := strings.TrimSuffix(markdownTarget, filepath.Ext(markdownTarget))
-	if _, err := os.Stat(filepath.Join(markdownDir, "_resources", "note.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(markdownDir, "resources", "note.txt")); err != nil {
 		t.Fatalf("Markdown resource was not exported: %v", err)
 	}
 	entries, err := os.ReadDir(markdownDir)
@@ -281,7 +280,7 @@ func TestJEXRoundTrip(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(string(noteContent), "_resources/note.txt") {
+	if !strings.Contains(string(noteContent), "resources/note.txt") {
 		t.Fatalf("Markdown body did not reference exported resource: %s", noteContent)
 	}
 }

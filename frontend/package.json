@@ -13,6 +13,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mohtasham/md-to-docx": "^4.0.1",
+    "canvg": "^4.0.3",
     "react": "19.1.5",
     "react-dom": "19.1.5",
     "vditor": "4.0.1"
@@ -23,5 +25,9 @@
     "typescript": "5.9.3",
     "vite": "7.3.7",
     "vitest": "5.0.5"
+  },
+  "overrides": {
+    "sharp": "0.35.5",
+    "katex": "0.19.1"
   }
 }

@@ -3,6 +3,7 @@ import type {
   ImportReport,
   JoplinProfilePreview,
   ManagedDirectoryReport,
+  NotebookDocxExport,
   Note,
   NoteExportRequest,
   NoteInput,
@@ -98,6 +99,10 @@ export const api = {
   importArchiveToNotebook: (notebookID: string, sourcePath = '') =>
     invoke<ImportReport>('ImportArchiveToNotebook', notebookID, sourcePath),
   exportNotebook: (notebookId: string, format: 'jex' | 'md') => invoke<string>('ExportNotebook', notebookId, format),
+  prepareNotebookDocx: (notebookId: string) =>
+    invoke<NotebookDocxExport>('PrepareNotebookDocxExport', notebookId),
+  saveDocxExport: (path: string, dataBase64: string) =>
+    invoke<void>('SaveDocxExport', path, dataBase64),
   exportNote: (request: NoteExportRequest) => invoke<string>('ExportNote', request),
   attachResource: (noteId: string) => invoke<Note>('AttachResource', noteId),
   pasteClipboardImage: (noteId: string) => invoke<Resource>('PasteClipboardImage', noteId),

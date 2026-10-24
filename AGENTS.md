@@ -96,8 +96,10 @@
 
 | 統一稱呼 | 程式對應 | 說明 |
 |---|---|---|
-| 筆記本右鍵選單 | `.notebook-context-menu` | 重新命名、新增子筆記本、匯入、匯出與刪除。 |
-| 直接管理筆記本右鍵選單 | `.notebook-context-menu` 搭配 `.notebook-row.is-managed` | 新增子資料夾、重新整理、在檔案總管顯示與停止管理；不提供匯入、匯出或一般刪除。 |
+| 筆記本右鍵選單 | `.notebook-context-menu` | 重新命名、新增子筆記本、匯入、JEX／Markdown／DOCX 匯出與刪除。 |
+| 直接管理筆記本右鍵選單 | `.notebook-context-menu` 搭配 `.notebook-row.is-managed` | 新增子資料夾、重新整理、在檔案總管顯示、Markdown／DOCX 匯出與停止管理；不提供匯入、JEX 或一般刪除。 |
+| Markdown 目錄匯出 | 「匯出 Markdown 目錄…」 | 選擇目的目錄後直接寫出 `.md`；圖片放 `images/`，其它附件放 `resources/`。 |
+| DOCX 匯出 | 「匯出 DOCX…」 | 將所選筆記本及子筆記本合併為一個 Word 文件，並內嵌本機附件；Mermaid fenced blocks 會先轉成 PNG 再嵌入。 |
 | 筆記右鍵選單 | `.note-context-menu` | 提供筆記的「移至筆記本」入口。 |
 | 筆記本名稱對話框 | `.notebook-name-dialog` | 新增最上層／子筆記本與重新命名筆記本的統一輸入視窗。 |
 | 筆記本選擇器 | `.note-move-dialog` | 搜尋完整目錄路徑並移動筆記。 |
