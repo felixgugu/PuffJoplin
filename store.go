@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,15 +11,96 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 var internalResourcePattern = regexp.MustCompile(`:/[A-Za-z0-9]{32}`)
+
+type textSearchPatternKey struct {
+	query         string
+	caseSensitive bool
+	wholeWord     bool
+}
+
+var textSearchPatternCache = struct {
+	sync.Mutex
+	entries map[textSearchPatternKey]*regexp.Regexp
+}{
+	entries: make(map[textSearchPatternKey]*regexp.Regexp),
+}
+
+func init() {
+	sqlite.MustRegisterDeterministicScalarFunction(
+		"puffjoplin_search_match",
+		4,
+		func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			text := searchArgumentString(args[0])
+			query := searchArgumentString(args[1])
+			caseSensitive := searchArgumentFlag(args[2])
+			wholeWord := searchArgumentFlag(args[3])
+			if query == "" {
+				return int64(1), nil
+			}
+			pattern := compiledTextSearchPattern(query, caseSensitive, wholeWord)
+			if pattern.MatchString(text) {
+				return int64(1), nil
+			}
+			return int64(0), nil
+		},
+	)
+}
+
+func searchArgumentString(value driver.Value) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	default:
+		return ""
+	}
+}
+
+func searchArgumentFlag(value driver.Value) bool {
+	switch typed := value.(type) {
+	case int64:
+		return typed != 0
+	case bool:
+		return typed
+	default:
+		return false
+	}
+}
+
+func compiledTextSearchPattern(query string, caseSensitive bool, wholeWord bool) *regexp.Regexp {
+	key := textSearchPatternKey{
+		query: query, caseSensitive: caseSensitive, wholeWord: wholeWord,
+	}
+	textSearchPatternCache.Lock()
+	defer textSearchPatternCache.Unlock()
+	if pattern := textSearchPatternCache.entries[key]; pattern != nil {
+		return pattern
+	}
+	if len(textSearchPatternCache.entries) >= 256 {
+		textSearchPatternCache.entries = make(map[textSearchPatternKey]*regexp.Regexp)
+	}
+	source := regexp.QuoteMeta(query)
+	if wholeWord {
+		source = `(?:^|[^\p{L}\p{N}_])(?:` + source + `)(?:$|[^\p{L}\p{N}_])`
+	}
+	if !caseSensitive {
+		source = `(?i)` + source
+	}
+	pattern := regexp.MustCompile(source)
+	textSearchPatternCache.entries[key] = pattern
+	return pattern
+}
 
 const notebookSubtreeCondition = `n.notebook_id IN (
 	WITH RECURSIVE notebook_subtree(id) AS (
@@ -173,6 +255,12 @@ func (s *Store) initialize(ctx context.Context) error {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL,
 			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS note_additional_info (
+			note_id TEXT PRIMARY KEY,
+			fields_json TEXT NOT NULL,
+			updated_at INTEGER NOT NULL,
+			FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS import_jobs (
 			id TEXT PRIMARY KEY,
@@ -765,9 +853,22 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 
 	search := strings.TrimSpace(query.Search)
 	if search != "" {
-		where = append(where, `(n.title LIKE ? ESCAPE '\' OR n.body LIKE ? ESCAPE '\')`)
-		pattern := "%" + escapeLike(search) + "%"
-		args = append(args, pattern, pattern)
+		searchField := strings.ToLower(strings.TrimSpace(query.SearchField))
+		searchArgs := []any{
+			search,
+			boolInt(query.SearchCaseSensitive),
+			boolInt(query.SearchWholeWord),
+		}
+		if searchField == "title" {
+			where = append(where, `puffjoplin_search_match(n.title, ?, ?, ?)`)
+			args = append(args, searchArgs...)
+		} else {
+			where = append(where,
+				`(puffjoplin_search_match(n.title, ?, ?, ?) OR puffjoplin_search_match(n.body, ?, ?, ?))`,
+			)
+			args = append(args, searchArgs...)
+			args = append(args, searchArgs...)
+		}
 	}
 	whereSQL := strings.Join(where, " AND ")
 
@@ -830,13 +931,6 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 	return NotePage{Items: items, Total: total}, rows.Err()
 }
 
-func escapeLike(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `%`, `\%`)
-	value = strings.ReplaceAll(value, `_`, `\_`)
-	return value
-}
-
 func noteSnippet(body string, max int) string {
 	body = strings.ReplaceAll(body, "\r\n", "\n")
 	body = regexp.MustCompile(`!\[([^\]]*)\]\([^)]+\)`).ReplaceAllString(body, "$1")
@@ -883,6 +977,10 @@ func (s *Store) GetNote(ctx context.Context, id string) (Note, error) {
 		return note, err
 	}
 	note.Resources, err = s.noteResources(ctx, id)
+	if err != nil {
+		return note, err
+	}
+	note.AdditionalInfo, err = s.NoteAdditionalInfo(ctx, id)
 	return note, err
 }
 
@@ -907,6 +1005,7 @@ func (s *Store) CreateNote(ctx context.Context, notebookID string, title string,
 	note := Note{
 		ID: newID(), NotebookID: notebookID, Title: title, Body: body,
 		CreatedAt: now, UpdatedAt: now, Tags: []string{}, Resources: []Resource{},
+		AdditionalInfo: defaultNoteInfoFields(),
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

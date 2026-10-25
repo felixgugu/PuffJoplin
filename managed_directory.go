@@ -776,6 +776,7 @@ func (s *Store) createManagedNote(ctx context.Context, notebook Notebook, title 
 		ExternalPath: path, Title: strings.TrimSuffix(filename, filepath.Ext(filename)),
 		Body: body, ExternalMTime: mtime, ExternalSize: size,
 		CreatedAt: now, UpdatedAt: mtime, Tags: []string{}, Resources: []Resource{},
+		AdditionalInfo: defaultNoteInfoFields(),
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

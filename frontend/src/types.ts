@@ -97,6 +97,13 @@ export interface Note {
   deletedAt: number;
   tags: string[];
   resources: Resource[];
+  additionalInfo: NoteInfoField[];
+}
+
+export interface NoteInfoField {
+  key: string;
+  label: string;
+  value: string;
 }
 
 export interface NoteInput {
@@ -125,6 +132,9 @@ export interface NoteQuery {
   tagId?: string;
   todoStatus?: TodoStatus;
   search?: string;
+  searchField?: SearchField;
+  searchCaseSensitive?: boolean;
+  searchWholeWord?: boolean;
   sortBy?: NoteSortBy;
   sortDirection?: NoteSortDirection;
   limit?: number;
@@ -134,6 +144,7 @@ export interface NoteQuery {
 export type NoteSortBy = 'title' | 'created' | 'updated' | 'due';
 export type NoteSortDirection = 'asc' | 'desc';
 export type SearchScope = 'all' | 'current';
+export type SearchField = 'all' | 'title';
 export type TodoStatus = 'open' | 'completed' | 'all';
 
 export interface NotePage {

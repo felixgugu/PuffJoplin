@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -346,6 +347,17 @@ func (a *App) UpdateNote(input NoteInput) (Note, error) {
 	return note, err
 }
 
+func (a *App) SetNoteAdditionalInfo(
+	noteID string,
+	fields []NoteInfoField,
+) ([]NoteInfoField, error) {
+	store, err := a.readyStore()
+	if err != nil {
+		return nil, err
+	}
+	return store.SetNoteAdditionalInfo(a.ctx, noteID, fields)
+}
+
 func (a *App) MoveNote(id string, notebookID string) (Note, error) {
 	store, err := a.readyStore()
 	if err != nil {
@@ -640,7 +652,29 @@ func (a *App) ExportNote(request NoteExportRequest) (string, error) {
 	if request.Format == "markdown" {
 		return path, exportNoteMarkdown(a.ctx, store, note.ID, path)
 	}
-	document, err := buildNoteExportHTML(a.ctx, store, note, request.HTML)
+	var pdfDecorations []pdfExportDecorations
+	pdfFooterCopyright := ""
+	if request.Format == "pdf" {
+		decorations, err := loadPDFExportDecorations(a.ctx, store, time.Now())
+		if err != nil {
+			return "", err
+		}
+		pdfFooterCopyright = decorations.FooterCopyright
+		coverDesign, globalFooterCopyright, err := loadPDFCoverDesign(a.ctx, store)
+		if err != nil {
+			return "", err
+		}
+		if coverDesign.Enabled {
+			coverHTML, err := buildPDFCoverHTML(note, coverDesign, globalFooterCopyright)
+			if err != nil {
+				return "", fmt.Errorf("建立 PDF 封面: %w", err)
+			}
+			decorations.CoverHTML = coverHTML
+			decorations.CoverWatermark = coverDesign.IncludeWatermark
+		}
+		pdfDecorations = append(pdfDecorations, decorations)
+	}
+	document, err := buildNoteExportHTML(a.ctx, store, note, request.HTML, pdfDecorations...)
 	if err != nil {
 		return "", err
 	}
@@ -650,11 +684,12 @@ func (a *App) ExportNote(request NoteExportRequest) (string, error) {
 		}
 		return path, nil
 	}
-	browserPath, err := findPDFBrowser()
-	if err != nil {
-		return "", err
-	}
-	if err := renderNotePDF(a.ctx, document, path, browserPath); err != nil {
+	if err := renderNotePDFWithFallback(
+		a.ctx,
+		document,
+		path,
+		pdfFooterCopyright,
+	); err != nil {
 		return "", err
 	}
 	return path, nil

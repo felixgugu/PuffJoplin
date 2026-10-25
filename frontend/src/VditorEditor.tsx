@@ -17,6 +17,7 @@ import EditorMediaContextMenu, {
   type EditorMediaContextTarget,
 } from './EditorMediaContextMenu';
 import TextColorPalette from './TextColorPalette';
+import { toolbarIcon, type ToolbarIconName } from './toolbarIcons';
 import { EditorViewportController } from './editorViewportController';
 import {
   applySearchHighlights,
@@ -55,6 +56,10 @@ import type { Resource } from './types';
 const vditorRoot = '/vditor/dist';
 const contentThemePath = `${vditorRoot}/css/content-theme`;
 const maxUploadBytes = 50 * 1024 * 1024;
+
+function toolbarIconItem(name: ToolbarIconName) {
+  return { name, icon: toolbarIcon(name) };
+}
 
 function uploadErrorMessage(value: string): string {
   try {
@@ -884,63 +889,60 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       tab: '\t',
       undoDelay: 300,
       toolbar: [
-        'emoji',
-        'headings',
-        'bold',
-        'italic',
-        'strike',
+        toolbarIconItem('emoji'),
+        toolbarIconItem('headings'),
+        toolbarIconItem('bold'),
+        toolbarIconItem('italic'),
+        toolbarIconItem('strike'),
         {
-          name: 'text-color',
+          ...toolbarIconItem('text-color'),
+          className: 'puff-text-color-toolbar',
           tip: '文字顏色',
           tipPosition: 'n',
-          icon: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 23h18" fill="none" stroke="#E53935" stroke-linecap="round" stroke-width="4"/><path d="m10 19 5-13h3l5 13M12.2 14h8.6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/></svg>',
           click: (event) => {
             if (event.currentTarget instanceof HTMLElement) {
               openTextColorPaletteRef.current(event.currentTarget);
             }
           },
         },
-        'link',
+        toolbarIconItem('link'),
         '|',
-        'list',
-        'ordered-list',
-        'check',
-        'outdent',
-        'indent',
+        toolbarIconItem('list'),
+        toolbarIconItem('ordered-list'),
+        toolbarIconItem('check'),
+        toolbarIconItem('outdent'),
+        toolbarIconItem('indent'),
         '|',
-        'quote',
-        'line',
-        'code',
-        'inline-code',
-        'insert-before',
-        'insert-after',
+        toolbarIconItem('quote'),
+        toolbarIconItem('line'),
+        toolbarIconItem('code'),
+        toolbarIconItem('inline-code'),
+        toolbarIconItem('insert-before'),
+        toolbarIconItem('insert-after'),
         '|',
-        'upload',
-        'table',
+        toolbarIconItem('upload'),
+        toolbarIconItem('table'),
         '|',
-        'undo',
-        'redo',
+        toolbarIconItem('undo'),
+        toolbarIconItem('redo'),
         '|',
         {
-          name: 'page-prev',
+          ...toolbarIconItem('page-prev'),
           tip: '上一頁 (Alt+←)',
           tipPosition: 'n',
-          icon: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="m8 19 8-8 8 8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/><path d="M16 13v13" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.4"/></svg>',
           click: () => scrollEditorPageRef.current(-1),
         },
         {
-          name: 'page-next',
+          ...toolbarIconItem('page-next'),
           tip: '下一頁 (Alt+→)',
           tipPosition: 'n',
-          icon: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="m8 13 8 8 8-8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/><path d="M16 19V6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.4"/></svg>',
           click: () => scrollEditorPageRef.current(1),
         },
         '|',
         {
-          name: 'find-replace',
+          ...toolbarIconItem('find-replace'),
           tip: '搜尋與取代 (Ctrl+F / Ctrl+H)',
           tipPosition: 'n',
-          icon: '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20 7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/></svg>',
           click: () => openFindRef.current('query'),
         },
         '|',
@@ -952,30 +954,27 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           tipPosition: 'n',
         },
         {
-          name: 'wysiwyg-mode',
+          ...toolbarIconItem('wysiwyg-mode'),
           tip: '所見即所得 (Alt+Ctrl+7)',
           tipPosition: 'n',
-          icon: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="4" width="22" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="m10.5 23 4-13h3l4 13M12.3 18h7.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/></svg>',
           click: () => activateEditorMode(editor, 'wysiwyg'),
         },
         {
-          name: 'ir-mode',
+          ...toolbarIconItem('ir-mode'),
           tip: '即時渲染 (Alt+Ctrl+8)',
           tipPosition: 'n',
-          icon: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="4" width="22" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="m17.5 8-7 10h5l-1 7 7-11h-5l1-6Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg>',
           click: () => activateEditorMode(editor, 'ir'),
         },
         {
-          name: 'source-mode',
+          ...toolbarIconItem('source-mode'),
           tip: '原始碼',
           tipPosition: 'n',
-          icon: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M11.3 8.7 3.9 16l7.4 7.3-2.2 2.3L0 16 9.1 6.4l2.2 2.3Zm9.4 0 7.4 7.3-7.4 7.3 2.2 2.3L32 16 22.9 6.4l-2.2 2.3ZM13 27.8l3.7-23.6 3 .5-3.7 23.6-3-.5Z"/></svg>',
           click: () => activateEditorMode(editor, 'sv'),
         },
-        'both',
-        'preview',
-        'outline',
-        'fullscreen',
+        toolbarIconItem('both'),
+        toolbarIconItem('preview'),
+        toolbarIconItem('outline'),
+        toolbarIconItem('fullscreen'),
       ],
       toolbarConfig: {
         pin: true,

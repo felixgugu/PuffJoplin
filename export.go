@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/microcosm-cc/bluemonday"
+	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
@@ -88,7 +91,58 @@ body { font-size: 14px; line-height: 1.75; }
 .note-content th { background: #f4f4f4; }
 .note-content hr { border: 0; border-top: 1px solid #dedede; }
 .note-content .vditor-toc { padding-left: 1.2em; }
-@page { size: A4; margin: 18mm 17mm; }
+.pdf-cover {
+  page: cover;
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  overflow: hidden;
+  break-after: page;
+  background: #ffffff;
+  color: #000000;
+  font-family: "Noto Sans TC", "Microsoft JhengHei UI", "Segoe UI", sans-serif;
+}
+.pdf-cover-field {
+  position: absolute;
+  width: max-content;
+  max-width: 200mm;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.pdf-cover-field.is-center {
+  width: 200mm;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: normal;
+}
+.pdf-cover-field.is-right { transform: translateX(-100%); text-align: right; }
+.pdf-cover-company { font-weight: 600; }
+.pdf-cover-title {
+  width: 200mm;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: normal;
+}
+.pdf-cover-subtitle {
+  width: 200mm;
+  line-height: 1.25;
+  white-space: normal;
+}
+.pdf-cover-body.is-center {
+  width: 200mm;
+  white-space: normal;
+}
+.pdf-cover-footer,
+.pdf-cover-copyright { color: #666666; line-height: 1.35; }
+.note-shell.cover-following { break-before: page; }
+.pdf-cover.has-watermark,
+.note-shell.has-background {
+  background-repeat: repeat;
+  background-position: center center;
+}
+@page cover { size: A4; margin: 0; }
+@page { size: A4; margin: 18mm 17mm 24mm; }
 @media print {
   .note-shell { max-width: none; padding: 0; }
   .note-content a { color: #1b1b1b; }
@@ -109,7 +163,8 @@ const noteExportDocument = `<!doctype html>
   <style>{{.CSS}}</style>
 </head>
 <body>
-  <main class="note-shell">
+  {{if .PDFCoverHTML}}<section class="pdf-cover{{if .PDFCoverWatermarkStyle}} has-watermark{{end}}" style="{{.PDFCoverWatermarkStyle}}" aria-label="文件封面">{{.PDFCoverHTML}}</section>{{end}}
+  <main class="note-shell{{if .PDFCoverHTML}} cover-following{{end}}{{if .PDFBodyBackgroundStyle}} has-background{{end}}" style="{{.PDFBodyBackgroundStyle}}">
     <div class="note-kicker">{{.Notebook}} · {{.Updated}}</div>
     <h1 class="note-title">{{.Title}}</h1>
     <article class="note-content">{{.Content}}</article>
@@ -118,14 +173,24 @@ const noteExportDocument = `<!doctype html>
 </html>`
 
 type noteExportDocumentData struct {
-	Title    string
-	Notebook string
-	Updated  string
-	CSS      template.CSS
-	Content  template.HTML
+	Title                  string
+	Notebook               string
+	Updated                string
+	CSS                    template.CSS
+	Content                template.HTML
+	PDFWatermarkStyle      template.CSS
+	PDFBodyBackgroundStyle template.CSS
+	PDFCoverWatermarkStyle template.CSS
+	PDFCoverHTML           template.HTML
 }
 
-func buildNoteExportHTML(ctx context.Context, store *Store, note Note, htmlContent string) (string, error) {
+func buildNoteExportHTML(
+	ctx context.Context,
+	store *Store,
+	note Note,
+	htmlContent string,
+	pdfDecorations ...pdfExportDecorations,
+) (string, error) {
 	notebook, err := store.getNotebook(ctx, note.NotebookID)
 	if err != nil {
 		return "", errors.New("筆記本不存在")
@@ -147,6 +212,14 @@ func buildNoteExportHTML(ctx context.Context, store *Store, note Note, htmlConte
 		CSS:      template.CSS(noteExportCSS),
 		Content:  template.HTML(embedded),
 	}
+	if len(pdfDecorations) > 0 {
+		data.PDFWatermarkStyle = pdfDecorations[0].WatermarkStyle
+		data.PDFBodyBackgroundStyle = pdfDecorations[0].BodyBackgroundStyle
+		data.PDFCoverHTML = pdfDecorations[0].CoverHTML
+		if pdfDecorations[0].CoverWatermark {
+			data.PDFCoverWatermarkStyle = pdfDecorations[0].WatermarkStyle
+		}
+	}
 	if data.Title == "" {
 		data.Title = "未命名筆記"
 	}
@@ -165,6 +238,12 @@ func sanitizeExportHTML(value string) string {
 	policy.AllowAttrs("align", "colspan", "rowspan").OnElements("td", "th")
 	policy.AllowAttrs("start").OnElements("ol")
 	policy.AllowURLSchemes("http", "https", "mailto")
+	policy.AllowURLSchemeWithCustomPolicy("data", func(value *url.URL) bool {
+		return strings.HasPrefix(
+			strings.ToLower(value.String()),
+			"data:image/png;base64,",
+		)
+	})
 	return policy.Sanitize(value)
 }
 
@@ -263,7 +342,13 @@ func exportResourceID(value string) (string, bool) {
 	return value, true
 }
 
-func renderNotePDF(ctx context.Context, htmlDocument string, destination string, browserPath string) error {
+func renderNotePDF(
+	ctx context.Context,
+	htmlDocument string,
+	destination string,
+	browserPath string,
+	footerCopyright ...string,
+) error {
 	tempDir, err := os.MkdirTemp("", "puffjoplin-pdf-*")
 	if err != nil {
 		return err
@@ -281,11 +366,15 @@ func renderNotePDF(ctx context.Context, htmlDocument string, destination string,
 	documentURL := (&url.URL{Scheme: "file", Path: documentPath}).String()
 
 	options := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
+	var browserOutput bytes.Buffer
 	options = append(options,
 		chromedp.ExecPath(browserPath),
 		chromedp.UserDataDir(filepath.Join(tempDir, "profile")),
 		chromedp.DisableGPU,
 		chromedp.Flag("hide-scrollbars", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-setuid-sandbox", true),
+		chromedp.CombinedOutput(&browserOutput),
 	)
 	allocatorContext, cancelAllocator := chromedp.NewExecAllocator(ctx, options...)
 	defer cancelAllocator()
@@ -295,6 +384,14 @@ func renderNotePDF(ctx context.Context, htmlDocument string, destination string,
 	defer cancelPrint()
 
 	if err := chromedp.Do(printContext, chromedp.Navigate(documentURL)); err != nil {
+		if output := strings.TrimSpace(browserOutput.String()); output != "" {
+			return fmt.Errorf(
+				"無法啟動 PDF 瀏覽器 %s: %w\n%s",
+				browserPath,
+				err,
+				output,
+			)
+		}
 		return fmt.Errorf("無法載入 PDF 頁面: %w", err)
 	}
 	if err := chromedp.Do(printContext, chromedp.WaitReady(chromedp.CSS("body"))); err != nil {
@@ -316,14 +413,22 @@ func renderNotePDF(ctx context.Context, htmlDocument string, destination string,
 	`, chromedp.EvalAwaitPromise)); err != nil {
 		return fmt.Errorf("等待 PDF 資源失敗: %w", err)
 	}
-	pdfData, err := chromedp.Run(printContext, chromedp.PrintToPDF(
+	printOptions := []chromedp.PDFOption{
 		chromedp.PDFPaper(chromedp.PaperA4),
 		chromedp.PDFMargins(0, 0, 0, 0),
 		chromedp.PDFPreferCSSPageSize(),
 		chromedp.PDFPrintBackground(),
 		chromedp.PDFOutlineAndTagged(),
 		chromedp.PDFStream(),
-	))
+	}
+	if len(footerCopyright) > 0 && strings.TrimSpace(footerCopyright[0]) != "" {
+		printOptions = append(
+			printOptions,
+			chromedp.PDFHeaderTemplate("<span></span>"),
+			chromedp.PDFFooterTemplate(pdfFooterHTMLTemplate(footerCopyright[0])),
+		)
+	}
+	pdfData, err := chromedp.Run(printContext, chromedp.PrintToPDF(printOptions...))
 	if err != nil {
 		return fmt.Errorf("產生 PDF 失敗: %w", err)
 	}
@@ -333,30 +438,154 @@ func renderNotePDF(ctx context.Context, htmlDocument string, destination string,
 	return os.WriteFile(destination, pdfData, 0o644)
 }
 
+func renderNotePDFWithFallback(
+	ctx context.Context,
+	htmlDocument string,
+	destination string,
+	footerCopyright string,
+) error {
+	browsers, err := findPDFBrowserCandidates()
+	if err != nil {
+		return err
+	}
+	errorsByBrowser := make([]string, 0, len(browsers))
+	for _, browserPath := range browsers {
+		attemptContext, cancel := context.WithTimeout(ctx, 50*time.Second)
+		renderErr := renderNotePDFWithCoverSplit(
+			attemptContext,
+			htmlDocument,
+			destination,
+			browserPath,
+			footerCopyright,
+		)
+		cancel()
+		if renderErr == nil {
+			return nil
+		}
+		errorsByBrowser = append(
+			errorsByBrowser,
+			fmt.Sprintf("%s: %v", browserPath, renderErr),
+		)
+	}
+	return errors.New("所有 PDF 瀏覽器都無法啟動:\n" + strings.Join(errorsByBrowser, "\n"))
+}
+
+func renderNotePDFWithCoverSplit(
+	ctx context.Context,
+	htmlDocument string,
+	destination string,
+	browserPath string,
+	footerCopyright string,
+) error {
+	if !strings.Contains(htmlDocument, `class="pdf-cover`) ||
+		strings.TrimSpace(footerCopyright) == "" {
+		return renderNotePDF(ctx, htmlDocument, destination, browserPath, footerCopyright)
+	}
+
+	tempDir, err := os.MkdirTemp("", "puffjoplin-pdf-parts-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+	coverPath := filepath.Join(tempDir, "cover.pdf")
+	bodyPath := filepath.Join(tempDir, "body.pdf")
+	if err := renderNotePDF(
+		ctx,
+		injectNotePrintVariant(htmlDocument, true),
+		coverPath,
+		browserPath,
+	); err != nil {
+		return fmt.Errorf("產生封面 PDF 失敗: %w", err)
+	}
+	if err := renderNotePDF(
+		ctx,
+		injectNotePrintVariant(htmlDocument, false),
+		bodyPath,
+		browserPath,
+		footerCopyright,
+	); err != nil {
+		return fmt.Errorf("產生內文 PDF 失敗: %w", err)
+	}
+	return mergePDFFiles(ctx, destination, coverPath, bodyPath)
+}
+
+func injectNotePrintVariant(htmlDocument string, coverOnly bool) string {
+	css := `<style>@media print{.pdf-cover{display:none!important}.note-shell.cover-following{break-before:auto!important}}</style>`
+	if coverOnly {
+		css = `<style>@media print{.note-shell{display:none!important}}</style>`
+	}
+	return strings.Replace(htmlDocument, "</head>", css+"</head>", 1)
+}
+
+func mergePDFFiles(ctx context.Context, destination string, paths ...string) error {
+	readers := make([]io.ReadSeeker, 0, len(paths))
+	files := make([]*os.File, 0, len(paths))
+	defer func() {
+		for _, file := range files {
+			_ = file.Close()
+		}
+	}()
+	for _, path := range paths {
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		files = append(files, file)
+		readers = append(readers, file)
+	}
+	var merged bytes.Buffer
+	if err := api.MergeRaw(
+		ctx,
+		readers,
+		&merged,
+		false,
+		model.NewDefaultConfiguration(),
+	); err != nil {
+		return fmt.Errorf("合併 PDF 頁面失敗: %w", err)
+	}
+	return os.WriteFile(destination, merged.Bytes(), 0o644)
+}
+
 func findPDFBrowser() (string, error) {
+	browsers, err := findPDFBrowserCandidates()
+	if err != nil {
+		return "", err
+	}
+	return browsers[0], nil
+}
+
+func findPDFBrowserCandidates() ([]string, error) {
+	candidates := make([]string, 0, 6)
+	seen := make(map[string]bool)
+	addCandidate := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" || seen[strings.ToLower(path)] {
+			return
+		}
+		if info, err := os.Stat(path); err != nil || info.IsDir() {
+			return
+		}
+		seen[strings.ToLower(path)] = true
+		candidates = append(candidates, path)
+	}
 	if configured := strings.TrimSpace(os.Getenv("PUFFJOPLIN_PDF_BROWSER")); configured != "" {
-		if _, err := os.Stat(configured); err == nil {
-			return configured, nil
-		}
+		addCandidate(configured)
 	}
-	for _, name := range []string{"msedge", "msedge.exe", "chrome", "chrome.exe", "chromium", "chromium-browser"} {
+	for _, name := range []string{"chrome", "chrome.exe", "msedge", "msedge.exe", "chromium", "chromium-browser"} {
 		if path, err := exec.LookPath(name); err == nil {
-			return path, nil
+			addCandidate(path)
 		}
 	}
-	candidates := []string{
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Microsoft", "Edge", "Application", "msedge.exe"),
-		filepath.Join(os.Getenv("ProgramFiles"), "Microsoft", "Edge", "Application", "msedge.exe"),
+	for _, candidate := range []string{
 		filepath.Join(os.Getenv("ProgramFiles"), "Google", "Chrome", "Application", "chrome.exe"),
 		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Microsoft", "Edge", "Application", "msedge.exe"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Microsoft", "Edge", "Application", "msedge.exe"),
+	} {
+		addCandidate(candidate)
 	}
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate, nil
-		}
+	if len(candidates) > 0 {
+		return candidates, nil
 	}
-	return "", errors.New("找不到 Microsoft Edge 或 Chrome，無法產生 PDF")
+	return nil, errors.New("找不到 Microsoft Edge 或 Chrome，無法產生 PDF")
 }

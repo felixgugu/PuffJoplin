@@ -64,26 +64,27 @@ type NoteSummary struct {
 }
 
 type Note struct {
-	ID            string     `json:"id"`
-	NotebookID    string     `json:"notebookId"`
-	StorageKind   string     `json:"storageKind"`
-	ExternalPath  string     `json:"externalPath"`
-	ExternalMTime int64      `json:"externalMTime"`
-	ExternalSize  int64      `json:"externalSize"`
-	Title         string     `json:"title"`
-	Body          string     `json:"body"`
-	IsTodo        bool       `json:"isTodo"`
-	TodoDue       int64      `json:"todoDue"`
-	TodoCompleted int64      `json:"todoCompleted"`
-	SourceURL     string     `json:"sourceUrl"`
-	Author        string     `json:"author"`
-	IsConflict    bool       `json:"isConflict"`
-	IsPinned      bool       `json:"isPinned"`
-	CreatedAt     int64      `json:"createdAt"`
-	UpdatedAt     int64      `json:"updatedAt"`
-	DeletedAt     int64      `json:"deletedAt"`
-	Tags          []string   `json:"tags"`
-	Resources     []Resource `json:"resources"`
+	ID             string          `json:"id"`
+	NotebookID     string          `json:"notebookId"`
+	StorageKind    string          `json:"storageKind"`
+	ExternalPath   string          `json:"externalPath"`
+	ExternalMTime  int64           `json:"externalMTime"`
+	ExternalSize   int64           `json:"externalSize"`
+	Title          string          `json:"title"`
+	Body           string          `json:"body"`
+	IsTodo         bool            `json:"isTodo"`
+	TodoDue        int64           `json:"todoDue"`
+	TodoCompleted  int64           `json:"todoCompleted"`
+	SourceURL      string          `json:"sourceUrl"`
+	Author         string          `json:"author"`
+	IsConflict     bool            `json:"isConflict"`
+	IsPinned       bool            `json:"isPinned"`
+	CreatedAt      int64           `json:"createdAt"`
+	UpdatedAt      int64           `json:"updatedAt"`
+	DeletedAt      int64           `json:"deletedAt"`
+	Tags           []string        `json:"tags"`
+	Resources      []Resource      `json:"resources"`
+	AdditionalInfo []NoteInfoField `json:"additionalInfo"`
 }
 
 type NoteInput struct {
@@ -98,16 +99,25 @@ type NoteInput struct {
 	Author        string `json:"author"`
 }
 
+type NoteInfoField struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
 type NoteQuery struct {
-	View          string `json:"view"`
-	NotebookID    string `json:"notebookId"`
-	TagID         string `json:"tagId"`
-	TodoStatus    string `json:"todoStatus"`
-	Search        string `json:"search"`
-	SortBy        string `json:"sortBy"`
-	SortDirection string `json:"sortDirection"`
-	Limit         int    `json:"limit"`
-	Offset        int    `json:"offset"`
+	View                string `json:"view"`
+	NotebookID          string `json:"notebookId"`
+	TagID               string `json:"tagId"`
+	TodoStatus          string `json:"todoStatus"`
+	Search              string `json:"search"`
+	SearchField         string `json:"searchField"`
+	SearchCaseSensitive bool   `json:"searchCaseSensitive"`
+	SearchWholeWord     bool   `json:"searchWholeWord"`
+	SortBy              string `json:"sortBy"`
+	SortDirection       string `json:"sortDirection"`
+	Limit               int    `json:"limit"`
+	Offset              int    `json:"offset"`
 }
 
 type NotePage struct {

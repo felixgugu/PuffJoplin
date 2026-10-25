@@ -2,6 +2,7 @@ import type {
   NoteQuery,
   NoteSortBy,
   NoteSortDirection,
+  SearchField,
   SearchScope,
   View,
 } from './types';
@@ -10,6 +11,9 @@ interface NoteQueryOptions {
   view: View;
   search: string;
   searchScope: SearchScope;
+  searchField: SearchField;
+  searchCaseSensitive: boolean;
+  searchWholeWord: boolean;
   searchNotebookID: string;
   sortBy: NoteSortBy;
   sortDirection: NoteSortDirection;
@@ -47,6 +51,9 @@ export function buildNoteListQuery(options: NoteQueryOptions): NoteQuery {
     tagId,
     todoStatus: options.view.kind === 'todo' ? options.todoStatus || 'open' : undefined,
     search: options.search,
+    searchField: options.searchField,
+    searchCaseSensitive: options.searchCaseSensitive,
+    searchWholeWord: options.searchWholeWord,
     sortBy: options.sortBy,
     sortDirection: options.sortDirection,
     limit: options.limit ?? 300,

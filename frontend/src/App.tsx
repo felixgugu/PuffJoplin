@@ -8,8 +8,16 @@ import {
   type FormEvent,
 } from 'react';
 import { api, onEvent } from './api';
+import {
+  parsePDFCoverDesign,
+  PDF_COVER_DESIGN_KEY,
+  resetPDFCoverDesign,
+  serializePDFCoverDesign,
+  type PDFCoverDesign,
+} from './coverDesign';
 import { convertNotebookMarkdownToDocx } from './docxExport';
 import EditorTabBar from './EditorTabBar';
+import FreeNumberInput from './FreeNumberInput';
 import {
   activateEditorTab as activateEditorTabState,
   closeEditorTab,
@@ -30,21 +38,58 @@ import {
   parseShowSourceLineNumbers,
   SOURCE_LINE_NUMBERS_KEY,
 } from './editorPreferences';
+import GlobalSearch from './GlobalSearch';
 import { KEYBOARD_SHORTCUT_GROUPS } from './keyboardShortcuts';
 import { onboardingDecision } from './onboarding';
+import { noteInfoFilledCount } from './noteInfo';
+import NoteAdditionalInfoDialog from './NoteAdditionalInfoDialog';
+import PdfCoverDesigner from './PdfCoverDesigner';
+import { toEditorMarkdown } from './resourceUrls';
 import { extractMermaidBlocks } from './mermaidBlocks';
 import {
   bytesToBase64,
   renderMermaidImage,
+  replaceMermaidCodeBlocksWithImages,
   type MermaidImageFormat,
 } from './mermaidExport';
 import NoteTags from './NoteTags';
+import {
+  DEFAULT_PDF_WATERMARK_FONT_SIZE,
+  DEFAULT_PDF_WATERMARK_HEIGHT,
+  DEFAULT_PDF_WATERMARK_OPACITY,
+  DEFAULT_PDF_WATERMARK_WIDTH,
+  DEFAULT_PDF_WATERMARK_ANGLE,
+  decodePDFSettingNumber,
+  decodePDFSettingText,
+  normalizePDFInteger,
+  parsePDFDecorationsEnabled,
+  parsePDFWatermarkShowBorder,
+  PDF_FOOTER_MAX_LENGTH,
+  PDF_FOOTER_ENABLED_KEY,
+  PDF_FOOTER_TEXT_KEY,
+  PDF_WATERMARK_ENABLED_KEY,
+  PDF_WATERMARK_FONT_SIZE_KEY,
+  PDF_WATERMARK_FONT_SIZE_RANGE,
+  PDF_WATERMARK_HEIGHT_KEY,
+  PDF_WATERMARK_HEIGHT_RANGE,
+  PDF_WATERMARK_MAX_LENGTH,
+  PDF_WATERMARK_OPACITY_KEY,
+  PDF_WATERMARK_OPACITY_RANGE,
+  PDF_WATERMARK_ANGLE_KEY,
+  PDF_WATERMARK_ANGLE_RANGE,
+  PDF_WATERMARK_SHOW_BORDER_KEY,
+  PDF_WATERMARK_TEXT_KEY,
+  PDF_WATERMARK_WIDTH_KEY,
+  PDF_WATERMARK_WIDTH_RANGE,
+  sanitizePDFSettingText,
+} from './pdfSettings';
 import {
   prepareNotebookDialogSubmission,
   type NotebookDialogMode,
 } from './notebookDialog';
 import UiIcon from './UiIcon';
 import VditorEditor, { type VditorEditorHandle } from './VditorEditor';
+import Vditor from 'vditor';
 import {
   NOTE_LIST_COLLAPSED_KEY,
   NOTE_LIST_SUMMARY_KEY,
@@ -55,13 +100,18 @@ import {
   TODO_STATUS_KEY,
   DEFAULT_TODO_SORT_DIRECTION,
   DEFAULT_TODO_STATUS,
+  parseSearchField,
   parseNoteSortBy,
   parseNoteSortDirection,
+  parseSearchToggle,
   parseShowNoteSummary,
   parseSearchScope,
   parseTodoStatus,
   parseTodoSortBy,
+  SEARCH_CASE_SENSITIVE_KEY,
+  SEARCH_FIELD_KEY,
   SEARCH_SCOPE_KEY,
+  SEARCH_WHOLE_WORD_KEY,
   shouldExpandNoteList,
 } from './noteListPreferences';
 import {
@@ -106,12 +156,14 @@ import type {
   JoplinProfilePreview,
   Note,
   NoteExportFormat,
+  NoteInfoField,
   NoteInput,
   NoteSummary,
   NoteSortBy,
   NoteSortDirection,
   Notebook,
   Resource,
+  SearchField,
   SearchScope,
   Tag,
   TodoStatus,
@@ -139,6 +191,7 @@ const emptyNote: Note = {
   deletedAt: 0,
   tags: [],
   resources: [],
+  additionalInfo: [],
 };
 
 function formatDate(value: number): string {
@@ -202,6 +255,7 @@ type NotebookDialogState = {
 
 const SETTINGS_TABS = [
   { id: 'appearance', label: '外觀' },
+  { id: 'pdf', label: 'PDF' },
   { id: 'shortcuts', label: '快捷鍵' },
   { id: 'data', label: '資料' },
 ] as const;
@@ -224,6 +278,7 @@ export default function App() {
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved');
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [noteInfoDialogOpen, setNoteInfoDialogOpen] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<NoteExportAction | null>(null);
   const [tagSaving, setTagSaving] = useState(false);
   const [toast, setToast] = useState('');
@@ -235,6 +290,21 @@ export default function App() {
     | null
   >(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance');
+  const [settingsMaximized, setSettingsMaximized] = useState(false);
+  const [pdfFooterCopyright, setPdfFooterCopyright] = useState('');
+  const [pdfWatermarkText, setPdfWatermarkText] = useState('');
+  const [pdfFooterEnabled, setPdfFooterEnabled] = useState(true);
+  const [pdfWatermarkEnabled, setPdfWatermarkEnabled] = useState(false);
+  const [pdfCoverDesign, setPdfCoverDesign] = useState<PDFCoverDesign>(
+    () => parsePDFCoverDesign(undefined),
+  );
+  const [pdfWatermarkWidth, setPdfWatermarkWidth] = useState(DEFAULT_PDF_WATERMARK_WIDTH);
+  const [pdfWatermarkHeight, setPdfWatermarkHeight] = useState(DEFAULT_PDF_WATERMARK_HEIGHT);
+  const [pdfWatermarkFontSize, setPdfWatermarkFontSize] = useState(DEFAULT_PDF_WATERMARK_FONT_SIZE);
+  const [pdfWatermarkOpacity, setPdfWatermarkOpacity] = useState(DEFAULT_PDF_WATERMARK_OPACITY);
+  const [pdfWatermarkAngle, setPdfWatermarkAngle] = useState(DEFAULT_PDF_WATERMARK_ANGLE);
+  const [pdfWatermarkShowBorder, setPdfWatermarkShowBorder] = useState(false);
+  const [pdfSettingsLoaded, setPdfSettingsLoaded] = useState(false);
   const [importProgress, setImportProgress] = useState<{ progress: number; message: string } | null>(null);
   const [leftWidth, setLeftWidth] = useState(() => storedWidth(SIDEBAR_WIDTH_KEY, 270, 210, 420));
   const [listWidth, setListWidth] = useState(() => storedWidth(NOTE_LIST_WIDTH_KEY, 330, 250, 480));
@@ -270,6 +340,15 @@ export default function App() {
   const [searchScope, setSearchScope] = useState<SearchScope>(
     () => parseSearchScope(localStorage.getItem(SEARCH_SCOPE_KEY)),
   );
+  const [searchField, setSearchField] = useState<SearchField>(
+    () => parseSearchField(localStorage.getItem(SEARCH_FIELD_KEY)),
+  );
+  const [searchCaseSensitive, setSearchCaseSensitive] = useState(
+    () => parseSearchToggle(localStorage.getItem(SEARCH_CASE_SENSITIVE_KEY)),
+  );
+  const [searchWholeWord, setSearchWholeWord] = useState(
+    () => parseSearchToggle(localStorage.getItem(SEARCH_WHOLE_WORD_KEY)),
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true',
   );
@@ -289,6 +368,7 @@ export default function App() {
     x: number;
     y: number;
   } | null>(null);
+  const [noteContextExportOpen, setNoteContextExportOpen] = useState(false);
   const [moveNoteDialog, setMoveNoteDialog] = useState<NoteSummary | null>(null);
   const [todoDueDialog, setTodoDueDialog] = useState<{
     note: TodoDueNote;
@@ -377,7 +457,10 @@ export default function App() {
 
   useEffect(() => {
     if (!noteContextMenu) return;
-    const close = () => setNoteContextMenu(null);
+    const close = () => {
+      setNoteContextMenu(null);
+      setNoteContextExportOpen(false);
+    };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') close();
     };
@@ -481,6 +564,18 @@ export default function App() {
   }, [searchScope]);
 
   useEffect(() => {
+    localStorage.setItem(SEARCH_FIELD_KEY, searchField);
+  }, [searchField]);
+
+  useEffect(() => {
+    localStorage.setItem(SEARCH_CASE_SENSITIVE_KEY, String(searchCaseSensitive));
+  }, [searchCaseSensitive]);
+
+  useEffect(() => {
+    localStorage.setItem(SEARCH_WHOLE_WORD_KEY, String(searchWholeWord));
+  }, [searchWholeWord]);
+
+  useEffect(() => {
     localStorage.setItem(EDITOR_TABS_KEY, JSON.stringify(editorTabs));
   }, [editorTabs]);
 
@@ -512,6 +607,55 @@ export default function App() {
     void api.setSetting(FONT_SIZE_SETTING, JSON.stringify(baseFontSize));
     void api.setSetting(FONT_FAMILY_SETTING, JSON.stringify(fontFamily));
   }, [appearanceLoaded, baseFontSize, fontFamily]);
+
+  useEffect(() => {
+    if (!pdfSettingsLoaded) return undefined;
+    const timer = window.setTimeout(() => {
+      void api.setSetting(
+        PDF_FOOTER_TEXT_KEY,
+        JSON.stringify(sanitizePDFSettingText(pdfFooterCopyright, PDF_FOOTER_MAX_LENGTH)),
+      );
+      void api.setSetting(
+        PDF_WATERMARK_TEXT_KEY,
+        JSON.stringify(sanitizePDFSettingText(pdfWatermarkText, PDF_WATERMARK_MAX_LENGTH)),
+      );
+      void api.setSetting(
+        PDF_FOOTER_ENABLED_KEY,
+        String(pdfFooterEnabled),
+      );
+      void api.setSetting(
+        PDF_WATERMARK_ENABLED_KEY,
+        String(pdfWatermarkEnabled),
+      );
+      void api.setSetting(PDF_WATERMARK_WIDTH_KEY, String(pdfWatermarkWidth));
+      void api.setSetting(PDF_WATERMARK_HEIGHT_KEY, String(pdfWatermarkHeight));
+      void api.setSetting(PDF_WATERMARK_FONT_SIZE_KEY, String(pdfWatermarkFontSize));
+      void api.setSetting(PDF_WATERMARK_OPACITY_KEY, String(pdfWatermarkOpacity));
+      void api.setSetting(PDF_WATERMARK_ANGLE_KEY, String(pdfWatermarkAngle));
+      void api.setSetting(
+        PDF_WATERMARK_SHOW_BORDER_KEY,
+        String(pdfWatermarkShowBorder),
+      );
+      void api.setSetting(
+        PDF_COVER_DESIGN_KEY,
+        serializePDFCoverDesign(pdfCoverDesign),
+      );
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    pdfFooterEnabled,
+    pdfCoverDesign,
+    pdfFooterCopyright,
+    pdfSettingsLoaded,
+    pdfWatermarkAngle,
+    pdfWatermarkFontSize,
+    pdfWatermarkHeight,
+    pdfWatermarkOpacity,
+    pdfWatermarkShowBorder,
+    pdfWatermarkText,
+    pdfWatermarkWidth,
+    pdfWatermarkEnabled,
+  ]);
 
   useEffect(() => {
     const syncWindowState = () => {
@@ -589,6 +733,9 @@ export default function App() {
       view,
       search,
       searchScope: effectiveSearchScope,
+      searchField,
+      searchCaseSensitive,
+      searchWholeWord,
       searchNotebookID,
       sortBy: activeSortBy,
       sortDirection: activeSortDirection,
@@ -601,7 +748,10 @@ export default function App() {
     activeSortDirection,
     effectiveSearchScope,
     search,
+    searchCaseSensitive,
+    searchField,
     searchNotebookID,
+    searchWholeWord,
     todoStatus,
     view,
   ]);
@@ -612,6 +762,9 @@ export default function App() {
     search,
     searching ? effectiveSearchScope : '',
     searching ? searchNotebookID : '',
+    searchField,
+    searchCaseSensitive ? 'case' : 'nocase',
+    searchWholeWord ? 'word' : 'substring',
     view.kind === 'todo' ? todoStatus : '',
   ].join(':');
 
@@ -865,6 +1018,52 @@ export default function App() {
       setBaseFontSize(nextFontSize);
       setFontFamily(nextFontFamily);
       setCustomFontSelected(!FONT_PRESETS.some((preset) => preset.value === nextFontFamily));
+      setPdfFooterCopyright(sanitizePDFSettingText(
+        decodePDFSettingText(settings[PDF_FOOTER_TEXT_KEY]),
+        PDF_FOOTER_MAX_LENGTH,
+      ));
+      setPdfWatermarkText(sanitizePDFSettingText(
+        decodePDFSettingText(settings[PDF_WATERMARK_TEXT_KEY]),
+        PDF_WATERMARK_MAX_LENGTH,
+      ));
+      setPdfFooterEnabled(
+        settings[PDF_FOOTER_ENABLED_KEY] === undefined
+          ? true
+          : parsePDFDecorationsEnabled(settings[PDF_FOOTER_ENABLED_KEY]),
+      );
+      setPdfWatermarkEnabled(parsePDFDecorationsEnabled(
+        settings[PDF_WATERMARK_ENABLED_KEY],
+      ));
+      setPdfCoverDesign(parsePDFCoverDesign(settings[PDF_COVER_DESIGN_KEY]));
+      setPdfWatermarkWidth(normalizePDFInteger(
+        decodePDFSettingNumber(settings[PDF_WATERMARK_WIDTH_KEY]),
+        DEFAULT_PDF_WATERMARK_WIDTH,
+        PDF_WATERMARK_WIDTH_RANGE,
+      ));
+      setPdfWatermarkHeight(normalizePDFInteger(
+        decodePDFSettingNumber(settings[PDF_WATERMARK_HEIGHT_KEY]),
+        DEFAULT_PDF_WATERMARK_HEIGHT,
+        PDF_WATERMARK_HEIGHT_RANGE,
+      ));
+      setPdfWatermarkFontSize(normalizePDFInteger(
+        decodePDFSettingNumber(settings[PDF_WATERMARK_FONT_SIZE_KEY]),
+        DEFAULT_PDF_WATERMARK_FONT_SIZE,
+        PDF_WATERMARK_FONT_SIZE_RANGE,
+      ));
+      setPdfWatermarkOpacity(normalizePDFInteger(
+        decodePDFSettingNumber(settings[PDF_WATERMARK_OPACITY_KEY]),
+        DEFAULT_PDF_WATERMARK_OPACITY,
+        PDF_WATERMARK_OPACITY_RANGE,
+      ));
+      setPdfWatermarkAngle(normalizePDFInteger(
+        decodePDFSettingNumber(settings[PDF_WATERMARK_ANGLE_KEY]),
+        DEFAULT_PDF_WATERMARK_ANGLE,
+        PDF_WATERMARK_ANGLE_RANGE,
+      ));
+      setPdfWatermarkShowBorder(parsePDFWatermarkShowBorder(
+        settings[PDF_WATERMARK_SHOW_BORDER_KEY],
+      ));
+      setPdfSettingsLoaded(true);
       setAppearanceLoaded(true);
       setBootstrap(state);
       const page = await api.listNotes({ view: 'all', limit: 300, offset: 0 });
@@ -1200,72 +1399,108 @@ export default function App() {
     }
   }, [notify]);
 
-  const trashCurrent = useCallback(async () => {
-    const note = currentRef.current;
+  const removeNoteFromWorkspace = useCallback(async (noteID: string) => {
+    const nextTabs = removeNoteFromEditorTabs(editorTabsRef.current, noteID);
+    setEditorTabs(nextTabs);
+    forgetEditorNotes([noteID]);
+    if (currentRef.current.id !== noteID) return;
+    if (nextTabs.activeID) await activateEditorTab(nextTabs.activeID, false);
+    else setCurrent(emptyNote);
+  }, [activateEditorTab, forgetEditorNotes]);
+
+  const trashNote = useCallback(async (
+    note: Pick<NoteSummary, 'id' | 'title'>,
+  ) => {
     if (!note.id) return;
-    if (savingRef.current) {
+    if (currentRef.current.id === note.id && savingRef.current) {
       notify('筆記正在儲存，請稍後再移至垃圾桶');
       return;
     }
-    const confirmed = await api.confirm('移至垃圾桶', `要將「${note.title || '未命名筆記'}」移至垃圾桶嗎？`);
+    const confirmed = await api.confirm(
+      '移至垃圾桶',
+      `要將「${note.title || '未命名筆記'}」移至垃圾桶嗎？`,
+    );
     if (!confirmed) return;
     try {
       await api.trashNote(note.id);
-      if (saveTimer.current !== null) {
-        window.clearTimeout(saveTimer.current);
-        saveTimer.current = null;
+      if (currentRef.current.id === note.id) {
+        if (saveTimer.current !== null) {
+          window.clearTimeout(saveTimer.current);
+          saveTimer.current = null;
+        }
+        dirtyRef.current = false;
+        pendingSaveRef.current = false;
+        setSaveState('saved');
       }
-      dirtyRef.current = false;
-      pendingSaveRef.current = false;
-      setSaveState('saved');
-      const nextTabs = removeNoteFromEditorTabs(editorTabsRef.current, note.id);
-      setEditorTabs(nextTabs);
-      forgetEditorNotes([note.id]);
-      if (nextTabs.activeID) await activateEditorTab(nextTabs.activeID, false);
-      else setCurrent(emptyNote);
+      await removeNoteFromWorkspace(note.id);
+      setNoteContextMenu(null);
+      setNoteContextExportOpen(false);
       await refreshNotes();
       notify('筆記已移至垃圾桶');
     } catch (error) {
       notify(`移至垃圾桶失敗：${errorMessage(error)}`);
     }
-  }, [activateEditorTab, forgetEditorNotes, notify, refreshNotes]);
+  }, [notify, refreshNotes, removeNoteFromWorkspace]);
 
-  const restoreCurrent = useCallback(async () => {
-    if (!current.id) return;
+  const restoreNote = useCallback(async (
+    note: Pick<NoteSummary, 'id'>,
+  ) => {
+    if (!note.id) return;
     try {
-      await api.restoreNote(current.id);
-      setCurrent((value) => ({ ...value, deletedAt: 0 }));
-      cacheEditorNote({ ...currentRef.current, deletedAt: 0 });
+      await api.restoreNote(note.id);
+      if (currentRef.current.id === note.id) {
+        setCurrent((value) => ({ ...value, deletedAt: 0 }));
+        cacheEditorNote({ ...currentRef.current, deletedAt: 0 });
+      }
+      setNoteContextMenu(null);
+      setNoteContextExportOpen(false);
       await refreshNotes();
       notify('筆記已還原');
     } catch (error) {
       notify(errorMessage(error));
     }
-  }, [cacheEditorNote, current.id, notify, refreshNotes]);
+  }, [cacheEditorNote, notify, refreshNotes]);
 
-  const permanentlyDeleteCurrent = useCallback(async () => {
-    if (!current.id) return;
-    const confirmed = await api.confirm('永久刪除', '永久刪除後無法復原，確定繼續嗎？');
+  const permanentlyDeleteNote = useCallback(async (
+    note: Pick<NoteSummary, 'id' | 'title'>,
+  ) => {
+    if (!note.id) return;
+    const confirmed = await api.confirm(
+      '永久刪除',
+      `「${note.title || '未命名筆記'}」永久刪除後無法復原，確定繼續嗎？`,
+    );
     if (!confirmed) return;
     try {
-      await api.deleteNotePermanently(current.id);
-      if (saveTimer.current !== null) {
-        window.clearTimeout(saveTimer.current);
-        saveTimer.current = null;
+      await api.deleteNotePermanently(note.id);
+      if (currentRef.current.id === note.id) {
+        if (saveTimer.current !== null) {
+          window.clearTimeout(saveTimer.current);
+          saveTimer.current = null;
+        }
+        dirtyRef.current = false;
+        pendingSaveRef.current = false;
+        setSaveState('saved');
       }
-      dirtyRef.current = false;
-      pendingSaveRef.current = false;
-      setSaveState('saved');
-      const nextTabs = removeNoteFromEditorTabs(editorTabsRef.current, current.id);
-      setEditorTabs(nextTabs);
-      forgetEditorNotes([current.id]);
-      if (nextTabs.activeID) await activateEditorTab(nextTabs.activeID, false);
-      else setCurrent(emptyNote);
+      await removeNoteFromWorkspace(note.id);
+      setNoteContextMenu(null);
+      setNoteContextExportOpen(false);
       await refreshNotes();
     } catch (error) {
       notify(errorMessage(error));
     }
-  }, [activateEditorTab, current.id, forgetEditorNotes, notify, refreshNotes]);
+  }, [notify, refreshNotes, removeNoteFromWorkspace]);
+
+  const trashCurrent = useCallback(async () => {
+    await trashNote(currentRef.current);
+  }, [trashNote]);
+
+  const restoreCurrent = useCallback(async () => {
+    await restoreNote(currentRef.current);
+  }, [restoreNote]);
+
+  const permanentlyDeleteCurrent = useCallback(async () => {
+    await permanentlyDeleteNote(currentRef.current);
+  }, [permanentlyDeleteNote]);
 
   const importProfile = useCallback(async () => {
     try {
@@ -1389,26 +1624,89 @@ export default function App() {
     }
   }, [activeNotebookId, notebooks, notify]);
 
-  const exportCurrentNote = useCallback(async (format: NoteExportFormat) => {
-    setExportMenuOpen(false);
-    if (!currentRef.current.id || exportingFormat) return;
-    const noteID = currentRef.current.id;
-    const noteTitle = currentRef.current.title;
-    if (dirtyRef.current) {
-      const saved = await saveCurrent();
-      if (!saved) {
-        notify('筆記尚未儲存完成，請稍後再匯出');
-        return;
+  const loadNoteForExport = useCallback(async (
+    note: Pick<NoteSummary, 'id' | 'title'>,
+  ): Promise<Note | null> => {
+    if (currentRef.current.id === note.id) {
+      if (dirtyRef.current) {
+        const saved = await saveCurrent();
+        if (!saved) {
+          notify('筆記尚未儲存完成，請稍後再匯出');
+          return null;
+        }
+      }
+      return currentRef.current;
+    }
+    try {
+      return await api.getNote(note.id);
+    } catch (error) {
+      notify(`無法讀取筆記：${errorMessage(error)}`);
+      return null;
+    }
+  }, [notify, saveCurrent]);
+
+  const renderNoteExportHTML = useCallback(async (note: Note): Promise<string> => {
+    const mermaidCodes = extractMermaidBlocks(note.body).map((block) => block.code);
+    if (currentRef.current.id === note.id) {
+      const renderedHTML = editorRef.current?.getHTML();
+      if (renderedHTML) {
+        return await replaceMermaidCodeBlocksWithImages(renderedHTML, mermaidCodes);
       }
     }
+    const host = document.createElement('div');
+    host.className = 'note-export-render-host';
+    host.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(host);
+    try {
+      await Vditor.preview(
+        host,
+        toEditorMarkdown(note.body, note.resources),
+        {
+          cdn: '/vditor',
+          lang: 'zh_TW',
+          icon: 'material',
+          mode: theme === 'dark' ? 'dark' : 'light',
+          theme: {
+            current: theme === 'dark' ? 'dark' : 'light',
+            path: '/vditor/dist/css/content-theme',
+          },
+          hljs: {
+            enable: true,
+            style: theme === 'dark' ? 'github-dark' : 'github',
+          },
+          markdown: {
+            sanitize: true,
+            gfmAutoLink: true,
+            footnotes: true,
+            toc: true,
+            codeBlockPreview: true,
+          },
+        },
+      );
+      return await replaceMermaidCodeBlocksWithImages(host.innerHTML, mermaidCodes);
+    } finally {
+      host.remove();
+    }
+  }, [theme]);
+
+  const exportNoteToFile = useCallback(async (
+    note: Pick<NoteSummary, 'id' | 'title'>,
+    format: NoteExportFormat,
+  ) => {
+    setExportMenuOpen(false);
+    setNoteContextMenu(null);
+    setNoteContextExportOpen(false);
+    if (!note.id || exportingFormat) return;
     setExportingFormat(format);
     try {
+      const loaded = await loadNoteForExport(note);
+      if (!loaded) return;
       if (format === 'docx') {
-        const prepared = await api.prepareNoteDocx(noteID);
+        const prepared = await api.prepareNoteDocx(note.id);
         if (!prepared.path) return;
         const dataBase64 = await convertNotebookMarkdownToDocx(
           prepared.markdown,
-          noteTitle || '未命名筆記',
+          loaded.title || '未命名筆記',
         );
         await api.saveDocxExport(prepared.path, dataBase64);
         notify(`已匯出至 ${prepared.path}`);
@@ -1416,15 +1714,10 @@ export default function App() {
       }
       let html: string | undefined;
       if (format === 'pdf' || format === 'html') {
-        const renderedHTML = editorRef.current?.getHTML();
-        if (!renderedHTML) {
-          notify('編輯器尚未載入完成，請稍後再試');
-          return;
-        }
-        html = renderedHTML;
+        html = await renderNoteExportHTML(loaded);
       }
       const path = await api.exportNote({
-        noteId: noteID,
+        noteId: note.id,
         format,
         html,
       });
@@ -1443,32 +1736,36 @@ export default function App() {
     } finally {
       setExportingFormat(null);
     }
-  }, [exportingFormat, notify, saveCurrent]);
+  }, [
+    exportingFormat,
+    loadNoteForExport,
+    notify,
+    renderNoteExportHTML,
+  ]);
 
-  const exportCurrentMermaid = useCallback(async (format: MermaidImageFormat) => {
+  const exportMermaidForNote = useCallback(async (
+    note: Pick<NoteSummary, 'id' | 'title'>,
+    format: MermaidImageFormat,
+  ) => {
     setExportMenuOpen(false);
-    if (!currentRef.current.id || exportingFormat) return;
-    const noteID = currentRef.current.id;
-    const blocks = extractMermaidBlocks(currentRef.current.body);
-    if (blocks.length === 0) {
-      notify('目前筆記沒有 Mermaid 圖表');
-      return;
-    }
-    if (dirtyRef.current) {
-      const saved = await saveCurrent();
-      if (!saved) {
-        notify('筆記尚未儲存完成，請稍後再匯出');
-        return;
-      }
-    }
+    setNoteContextMenu(null);
+    setNoteContextExportOpen(false);
+    if (!note.id || exportingFormat) return;
     setExportingFormat(`mermaid-${format}`);
     try {
+      const loaded = await loadNoteForExport(note);
+      if (!loaded) return;
+      const blocks = extractMermaidBlocks(loaded.body);
+      if (blocks.length === 0) {
+        notify('這篇筆記沒有 Mermaid 圖表');
+        return;
+      }
       const images: string[] = [];
       for (const block of blocks) {
         const image = await renderMermaidImage(block.code, format);
         images.push(bytesToBase64(image.data));
       }
-      const directory = await api.exportMermaidImages(noteID, format, images);
+      const directory = await api.exportMermaidImages(note.id, format, images);
       if (directory) {
         notify(`已將 ${blocks.length} 張 Mermaid ${format.toUpperCase()} 匯出至 ${directory}`);
       }
@@ -1484,7 +1781,15 @@ export default function App() {
     } finally {
       setExportingFormat(null);
     }
-  }, [exportingFormat, notify, saveCurrent]);
+  }, [exportingFormat, loadNoteForExport, notify]);
+
+  const exportCurrentNote = useCallback(async (format: NoteExportFormat) => {
+    await exportNoteToFile(currentRef.current, format);
+  }, [exportNoteToFile]);
+
+  const exportCurrentMermaid = useCallback(async (format: MermaidImageFormat) => {
+    await exportMermaidForNote(currentRef.current, format);
+  }, [exportMermaidForNote]);
 
   const updateNoteTodo = useCallback(async (
     note: Pick<NoteSummary, 'id' | 'isTodo' | 'todoDue' | 'todoCompleted'>,
@@ -1603,6 +1908,17 @@ export default function App() {
     }
   }, [cacheEditorNote, notify, refreshNotes, refreshTaxonomy, tagSaving]);
 
+  const saveNoteAdditionalInfo = useCallback(async (fields: NoteInfoField[]) => {
+    const noteID = currentRef.current.id;
+    if (!noteID) throw new Error('目前沒有開啟的筆記');
+    const saved = await api.setNoteAdditionalInfo(noteID, fields);
+    const updated = { ...currentRef.current, additionalInfo: saved };
+    cacheEditorNote(updated);
+    setCurrent((note) => note.id === noteID ? { ...note, additionalInfo: saved } : note);
+    setNoteInfoDialogOpen(false);
+    notify('附加資訊已儲存');
+  }, [cacheEditorNote, notify]);
+
   const moveNoteToNotebook = useCallback(async (note: NoteSummary, notebookID: string) => {
     if (!notebookID || notebookID === note.notebookId) {
       setMoveNoteDialog(null);
@@ -1708,9 +2024,17 @@ export default function App() {
         ? activeNotebook?.title || '筆記本'
         : '全部筆記';
   const noteContextMenuHeight = noteContextMenu
-    ? 42 +
-      (noteContextMenu.note.storageKind === 'directory' ? 72 : 0) +
-      (noteContextMenu.note.isTodo ? 112 : 42)
+    ? Math.min(
+      window.innerHeight - 16,
+      42 +
+        34 +
+        (noteContextExportOpen ? 216 : 34) +
+        (noteContextMenu.note.isTodo ? 112 : 42) +
+        34 +
+        (noteContextMenu.note.storageKind === 'directory' ? 72 : 0) +
+        (noteContextMenu.note.deletedAt > 0 ? 72 : 34) +
+        30,
+    )
     : 0;
 
   const toggleNotebook = (notebookID: string) => {
@@ -1831,37 +2155,19 @@ export default function App() {
           <span className="titlebar-location">{activeViewTitle}</span>
           <span className="titlebar-count">{notes.length} 篇</span>
         </div>
-        <div className="titlebar-search window-control">
-          <span aria-hidden="true">⌕</span>
-          <select
-            className="titlebar-search-scope"
-            value={effectiveSearchScope}
-            aria-label="搜尋範圍"
-            title="選擇搜尋範圍"
-            onChange={(event) => setSearchScope(parseSearchScope(event.target.value))}
-          >
-            <option value="all">全部筆記本</option>
-            <option value="current" disabled={!searchNotebookID}>目前目錄</option>
-          </select>
-          <input
-            id="search-input"
-            value={search}
-            aria-label={effectiveSearchScope === 'current' ? '搜尋目前目錄與子目錄' : '搜尋全部筆記本'}
-            placeholder={effectiveSearchScope === 'current' ? '搜尋目前目錄…' : '搜尋全部筆記本…'}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          {search && (
-            <button
-              className="icon-button search-clear-button"
-              type="button"
-              aria-label="清除搜尋"
-              title="清除搜尋"
-              onClick={() => setSearch('')}
-            >
-              <UiIcon name="close" />
-            </button>
-          )}
-        </div>
+        <GlobalSearch
+          query={search}
+          scope={effectiveSearchScope}
+          field={searchField}
+          caseSensitive={searchCaseSensitive}
+          wholeWord={searchWholeWord}
+          hasCurrentNotebook={Boolean(searchNotebookID)}
+          onQueryChange={setSearch}
+          onScopeChange={setSearchScope}
+          onFieldChange={setSearchField}
+          onCaseSensitiveChange={setSearchCaseSensitive}
+          onWholeWordChange={setSearchWholeWord}
+        />
         <div className="window-actions window-control">
           <button
             className="icon-button titlebar-tool"
@@ -1877,7 +2183,10 @@ export default function App() {
             type="button"
             aria-label="開啟設定"
             title="設定"
-            onClick={() => setModal({ kind: 'settings' })}
+            onClick={() => {
+              setSettingsMaximized(false);
+              setModal({ kind: 'settings' });
+            }}
           >
             <UiIcon name="settings" />
           </button>
@@ -2270,6 +2579,7 @@ export default function App() {
                   }}
                   onContextMenu={(event) => {
                     event.preventDefault();
+                    setNoteContextExportOpen(false);
                     setNoteContextMenu({ note, x: event.clientX, y: event.clientY });
                   }}
                 >
@@ -2517,6 +2827,20 @@ export default function App() {
                 onChange={(nextTags) => void updateTags(nextTags)}
               />
               <div className="editor-footer-actions">
+                <button
+                  className="note-info-trigger"
+                  type="button"
+                  title="編輯 PDF 封面附加資訊"
+                  onClick={() => setNoteInfoDialogOpen(true)}
+                  disabled={current.deletedAt > 0}
+                >
+                  附加資訊
+                  {noteInfoFilledCount(current.additionalInfo) > 0 && (
+                    <span className="note-info-trigger-count">
+                      {noteInfoFilledCount(current.additionalInfo)}
+                    </span>
+                  )}
+                </button>
                 {current.resources.length > 0 && (
                   <div
                     className="attachment-picker"
@@ -2665,17 +2989,6 @@ export default function App() {
               >
                 <UiIcon name="folder" /> 匯出 Markdown 目錄…
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  const notebook = notebookContextMenu.notebook;
-                  setNotebookContextMenu(null);
-                  void exportNotebook('docx', notebook.id);
-                }}
-              >
-                <UiIcon name="all-notes" /> 匯出 DOCX…
-              </button>
               {!notebookContextMenu.notebook.storagePath && (
                 <>
                   <div className="context-menu-separator" />
@@ -2732,32 +3045,10 @@ export default function App() {
                 onClick={() => {
                   const notebook = notebookContextMenu.notebook;
                   setNotebookContextMenu(null);
-                  void exportNotebook('jex', notebook.id);
-                }}
-              >
-                <UiIcon name="panel-close" /> 匯出 JEX…
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  const notebook = notebookContextMenu.notebook;
-                  setNotebookContextMenu(null);
                   void exportNotebook('md', notebook.id);
                 }}
               >
                 <UiIcon name="folder" /> 匯出 Markdown 目錄…
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  const notebook = notebookContextMenu.notebook;
-                  setNotebookContextMenu(null);
-                  void exportNotebook('docx', notebook.id);
-                }}
-              >
-                <UiIcon name="all-notes" /> 匯出 DOCX…
               </button>
               <div className="context-menu-separator" />
               <button
@@ -2783,7 +3074,7 @@ export default function App() {
           role="menu"
           aria-label={`${noteContextMenu.note.title || '未命名筆記'} 操作`}
           style={{
-            left: Math.max(8, Math.min(noteContextMenu.x, window.innerWidth - 224)),
+            left: Math.max(8, Math.min(noteContextMenu.x, window.innerWidth - 256)),
             top: Math.max(
               8,
               Math.min(
@@ -2795,27 +3086,85 @@ export default function App() {
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="context-menu-title">{noteContextMenu.note.title || '未命名筆記'}</div>
-          {noteContextMenu.note.storageKind === 'directory' && (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => void copyNoteFilePath(noteContextMenu.note)}
-              >
-                <UiIcon name="copy" />
-                複製檔案路徑
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => void revealNoteFile(noteContextMenu.note)}
-              >
-                <UiIcon name="folder-managed" />
-                開啟至檔案總管
-              </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const note = noteContextMenu.note;
+              setNoteContextMenu(null);
+              setNoteContextExportOpen(false);
+              void togglePinned(note);
+            }}
+          >
+            <UiIcon name="pin" filled={noteContextMenu.note.isPinned} />
+            {noteContextMenu.note.isPinned ? '取消釘選' : '釘選至最上方'}
+          </button>
+          <button
+            className={`note-context-submenu-trigger ${noteContextExportOpen ? 'active' : ''}`}
+            type="button"
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={noteContextExportOpen}
+            disabled={exportingFormat !== null}
+            onClick={() => setNoteContextExportOpen((value) => !value)}
+          >
+            <UiIcon name="download" />
+            匯出
+            <UiIcon name="chevron-down" className="context-menu-chevron" />
+          </button>
+          {noteContextExportOpen && (
+            <div className="note-context-export-menu" role="group" aria-label="筆記匯出格式">
+              {([
+                ['pdf', 'PDF'],
+                ['html', 'HTML'],
+                ['markdown', 'Markdown'],
+                ['docx', 'DOCX'],
+              ] as const).map(([format, label]) => (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={exportingFormat !== null}
+                  key={format}
+                  onClick={() => void exportNoteToFile(noteContextMenu.note, format)}
+                >
+                  <span>{label}</span>
+                  {exportingFormat === format && <span className="context-menu-busy">…</span>}
+                </button>
+              ))}
               <div className="context-menu-separator" />
-            </>
+              {([
+                ['svg', 'Mermaid SVG'],
+                ['png', 'Mermaid PNG'],
+              ] as const).map(([format, label]) => (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={exportingFormat !== null}
+                  key={format}
+                  onClick={() => void exportMermaidForNote(noteContextMenu.note, format)}
+                >
+                  <span>{label}</span>
+                  {exportingFormat === `mermaid-${format}` && (
+                    <span className="context-menu-busy">…</span>
+                  )}
+                </button>
+              ))}
+            </div>
           )}
+          <div className="context-menu-separator" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMoveNoteDialog(noteContextMenu.note);
+              setNotebookPickerSearch('');
+              setNoteContextMenu(null);
+              setNoteContextExportOpen(false);
+            }}
+          >
+            <span>↪</span> 移至筆記本…
+          </button>
+          <div className="context-menu-separator" />
           {noteContextMenu.note.isTodo ? (
             <>
               <button
@@ -2824,6 +3173,7 @@ export default function App() {
                 onClick={() => {
                   const note = noteContextMenu.note;
                   setNoteContextMenu(null);
+                  setNoteContextExportOpen(false);
                   void updateNoteTodo(note, nextTodoState(note));
                 }}
               >
@@ -2844,43 +3194,93 @@ export default function App() {
                 onClick={() => {
                   const note = noteContextMenu.note;
                   setNoteContextMenu(null);
+                  setNoteContextExportOpen(false);
                   void updateNoteTodo(note, cancelTodo());
                 }}
               >
                 <UiIcon name="close" />
                 取消待辦
               </button>
-              <div className="context-menu-separator" />
             </>
           ) : (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const note = noteContextMenu.note;
+                setNoteContextMenu(null);
+                setNoteContextExportOpen(false);
+                void updateNoteTodo(note, convertToTodo());
+              }}
+            >
+              <UiIcon name="todo" />
+              轉為待辦
+            </button>
+          )}
+          {noteContextMenu.note.storageKind === 'directory' && (
+            <>
+              <div className="context-menu-separator" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void copyNoteFilePath(noteContextMenu.note)}
+              >
+                <UiIcon name="copy" />
+                複製檔案路徑
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void revealNoteFile(noteContextMenu.note)}
+              >
+                <UiIcon name="folder-managed" />
+                開啟至檔案總管
+              </button>
+            </>
+          )}
+          <div className="context-menu-separator" />
+          {noteContextMenu.note.deletedAt > 0 ? (
             <>
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => {
-                  const note = noteContextMenu.note;
-                  setNoteContextMenu(null);
-                  void updateNoteTodo(note, convertToTodo());
-                }}
+                onClick={() => void restoreNote(noteContextMenu.note)}
               >
-                <UiIcon name="todo" />
-                轉為待辦
+                <UiIcon name="todo-checkbox" />
+                還原筆記
               </button>
-              <div className="context-menu-separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="danger"
+                onClick={() => void permanentlyDeleteNote(noteContextMenu.note)}
+              >
+                <UiIcon name="trash" />
+                永久刪除
+              </button>
             </>
+          ) : (
+            <button
+              type="button"
+              role="menuitem"
+              className="danger"
+              onClick={() => void trashNote(noteContextMenu.note)}
+            >
+              <UiIcon name="trash" />
+              移至垃圾桶
+            </button>
           )}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setMoveNoteDialog(noteContextMenu.note);
-              setNotebookPickerSearch('');
-              setNoteContextMenu(null);
-            }}
-          >
-            <span>↪</span> 移至筆記本…
-          </button>
         </div>
+      )}
+
+      {noteInfoDialogOpen && current.id && (
+        <NoteAdditionalInfoDialog
+          key={current.id}
+          noteTitle={current.title}
+          fields={current.additionalInfo}
+          onCancel={() => setNoteInfoDialogOpen(false)}
+          onSave={saveNoteAdditionalInfo}
+        />
       )}
 
       {todoDueDialog && (
@@ -3196,19 +3596,38 @@ export default function App() {
       {modal?.kind === 'settings' && (
         <div className="modal-backdrop" onMouseDown={() => setModal(null)}>
           <div
-            className="modal-card settings-modal"
+            className={`modal-card settings-modal ${settingsMaximized ? 'is-maximized' : ''}`}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <header>
               <div><span className="eyebrow">PuffJoplin</span><h2>設定</h2></div>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="關閉設定"
-                onClick={() => setModal(null)}
-              >
-                <UiIcon name="close" />
-              </button>
+              <div className="settings-window-actions">
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={settingsMaximized ? '還原設定' : '最大化設定'}
+                  title={settingsMaximized ? '還原設定' : '最大化設定'}
+                  onClick={() => setSettingsMaximized((value) => !value)}
+                >
+                  {settingsMaximized ? (
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                      <path d="M3.5 3.5h5v5h-5zM2 2h5v1.5H3.5V7H2z" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                      <path d="M2.5 2.5h7v7h-7z" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label="關閉設定"
+                  onClick={() => setModal(null)}
+                >
+                  <UiIcon name="close" />
+                </button>
+              </div>
             </header>
             <div
               className="settings-tabs"
@@ -3285,14 +3704,13 @@ export default function App() {
                         value={baseFontSize}
                         onChange={(event) => setBaseFontSize(normalizeBaseFontSize(event.target.value))}
                       />
-                      <input
-                        type="number"
+                      <FreeNumberInput
+                        value={baseFontSize}
+                        ariaLabel="主要字體大小（像素）"
                         min={12}
                         max={20}
-                        step={1}
-                        value={baseFontSize}
-                        aria-label="主要字體大小（像素）"
-                        onChange={(event) => setBaseFontSize(normalizeBaseFontSize(event.target.value))}
+                        precision={0}
+                        onCommit={(value) => setBaseFontSize(normalizeBaseFontSize(value))}
                       />
                       <span>px</span>
                     </div>
@@ -3350,6 +3768,255 @@ export default function App() {
                   <span className="font-preview-subtitle">目前位置</span>
                   <p>主要內文以清晰的 1× 字級呈現，方便長時間閱讀與編輯。</p>
                   <small>筆記說明與次要資訊使用 0.8× 字級。</small>
+                </div>
+              </section>
+              <section
+                id="settings-panel-pdf"
+                className="settings-pdf"
+                role="tabpanel"
+                aria-labelledby="settings-tab-pdf"
+                tabIndex={0}
+                hidden={settingsTab !== 'pdf'}
+              >
+                <div className="settings-section-heading">
+                  <div>
+                    <strong id="pdf-settings-heading">PDF 匯出</strong>
+                    <span>設定 PDF 封面、每頁頁尾與滿版浮水印；HTML 匯出不受影響。</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPdfFooterCopyright('');
+                      setPdfWatermarkText('');
+                      setPdfFooterEnabled(true);
+                      setPdfWatermarkEnabled(false);
+                      setPdfCoverDesign(resetPDFCoverDesign(false));
+                      setPdfWatermarkWidth(DEFAULT_PDF_WATERMARK_WIDTH);
+                      setPdfWatermarkHeight(DEFAULT_PDF_WATERMARK_HEIGHT);
+                      setPdfWatermarkFontSize(DEFAULT_PDF_WATERMARK_FONT_SIZE);
+                      setPdfWatermarkOpacity(DEFAULT_PDF_WATERMARK_OPACITY);
+                      setPdfWatermarkAngle(DEFAULT_PDF_WATERMARK_ANGLE);
+                      setPdfWatermarkShowBorder(false);
+                    }}
+                  >
+                    清除設定
+                  </button>
+                </div>
+                <PdfCoverDesigner
+                  design={pdfCoverDesign}
+                  noteTitle={current.title}
+                  fields={current.additionalInfo}
+                  globalFooterCopyright={pdfFooterCopyright}
+                  onChange={setPdfCoverDesign}
+                  onReset={() => setPdfCoverDesign(resetPDFCoverDesign(pdfCoverDesign.enabled))}
+                />
+                <div className="pdf-settings-toggles">
+                  <div className="pdf-settings-enable">
+                    <label className="appearance-toggle">
+                      <input
+                        type="checkbox"
+                        checked={pdfFooterEnabled}
+                        onChange={(event) => setPdfFooterEnabled(event.target.checked)}
+                      />
+                      <span className="appearance-toggle-track" aria-hidden="true" />
+                      <span>在 PDF 加入版權宣告頁尾</span>
+                    </label>
+                    <small>{pdfFooterEnabled
+                      ? '版權宣告會顯示於每頁內文底部；封面位置由封面變數控制。'
+                      : '目前關閉；版權宣告文字仍會保留。'}</small>
+                  </div>
+                  <div className="pdf-settings-enable">
+                    <label className="appearance-toggle">
+                      <input
+                        type="checkbox"
+                        checked={pdfWatermarkEnabled}
+                        onChange={(event) => setPdfWatermarkEnabled(event.target.checked)}
+                      />
+                      <span className="appearance-toggle-track" aria-hidden="true" />
+                      <span>在 PDF 加入浮水印</span>
+                    </label>
+                    <small>{pdfWatermarkEnabled
+                      ? '浮水印會套用到內文頁；封面另由封面浮水印開關控制。'
+                      : '目前關閉；浮水印參數仍會保留。'}</small>
+                  </div>
+                </div>
+                <div className="pdf-settings-controls">
+                  <label className="pdf-settings-field">
+                    <span className="pdf-settings-label">
+                      <span>頁尾版權宣告</span>
+                      <small>{Array.from(pdfFooterCopyright).length}/{PDF_FOOTER_MAX_LENGTH}</small>
+                    </span>
+                    <input
+                      type="text"
+                      value={pdfFooterCopyright}
+                      maxLength={PDF_FOOTER_MAX_LENGTH}
+                      placeholder="例如：© 2026 PuffJoplin. All rights reserved."
+                      onChange={(event) => setPdfFooterCopyright(event.target.value)}
+                      onBlur={() => setPdfFooterCopyright((value) =>
+                        sanitizePDFSettingText(value, PDF_FOOTER_MAX_LENGTH))}
+                    />
+                    <small>空白時不顯示頁尾；文字會置中顯示於每一頁底部。</small>
+                  </label>
+                  <label className="pdf-settings-field">
+                    <span className="pdf-settings-label">
+                      <span>浮水印文字</span>
+                      <small>{Array.from(pdfWatermarkText).length}/{PDF_WATERMARK_MAX_LENGTH}</small>
+                    </span>
+                    <input
+                      type="text"
+                      value={pdfWatermarkText}
+                      maxLength={PDF_WATERMARK_MAX_LENGTH}
+                      placeholder="例如：內部文件／PuffJoplin"
+                      onChange={(event) => setPdfWatermarkText(event.target.value)}
+                      onBlur={() => setPdfWatermarkText((value) =>
+                        sanitizePDFSettingText(value, PDF_WATERMARK_MAX_LENGTH))}
+                    />
+                    <small>空白時不顯示浮水印；第二行自動使用 PDF 匯出日期。</small>
+                  </label>
+                </div>
+                <div className="pdf-watermark-parameters">
+                  <div className="pdf-watermark-parameters-heading">
+                    <strong>浮水印參數</strong>
+                    <span>調整圖樣尺寸、字級與整體透明度。</span>
+                  </div>
+                  <div className="pdf-watermark-parameter-grid">
+                    <label className="pdf-watermark-parameter">
+                      <span>畫布寬度</span>
+                      <div>
+                        <FreeNumberInput
+                          value={pdfWatermarkWidth}
+                          ariaLabel="浮水印畫布寬度（像素）"
+                          min={PDF_WATERMARK_WIDTH_RANGE[0]}
+                          max={PDF_WATERMARK_WIDTH_RANGE[1]}
+                          precision={0}
+                          onCommit={(value) => {
+                            setPdfWatermarkWidth(normalizePDFInteger(
+                              value,
+                              DEFAULT_PDF_WATERMARK_WIDTH,
+                              PDF_WATERMARK_WIDTH_RANGE,
+                            ));
+                          }}
+                        />
+                        <span>px</span>
+                      </div>
+                    </label>
+                    <label className="pdf-watermark-parameter">
+                      <span>畫布高度</span>
+                      <div>
+                        <FreeNumberInput
+                          value={pdfWatermarkHeight}
+                          ariaLabel="浮水印畫布高度（像素）"
+                          min={PDF_WATERMARK_HEIGHT_RANGE[0]}
+                          max={PDF_WATERMARK_HEIGHT_RANGE[1]}
+                          precision={0}
+                          onCommit={(value) => {
+                            setPdfWatermarkHeight(normalizePDFInteger(
+                              value,
+                              DEFAULT_PDF_WATERMARK_HEIGHT,
+                              PDF_WATERMARK_HEIGHT_RANGE,
+                            ));
+                          }}
+                        />
+                        <span>px</span>
+                      </div>
+                    </label>
+                    <label className="pdf-watermark-parameter">
+                      <span>字體大小</span>
+                      <div>
+                        <FreeNumberInput
+                          value={pdfWatermarkFontSize}
+                          ariaLabel="浮水印字體大小（像素）"
+                          min={PDF_WATERMARK_FONT_SIZE_RANGE[0]}
+                          max={PDF_WATERMARK_FONT_SIZE_RANGE[1]}
+                          precision={0}
+                          onCommit={(value) => {
+                            setPdfWatermarkFontSize(normalizePDFInteger(
+                              value,
+                              DEFAULT_PDF_WATERMARK_FONT_SIZE,
+                              PDF_WATERMARK_FONT_SIZE_RANGE,
+                            ));
+                          }}
+                        />
+                        <span>px</span>
+                      </div>
+                    </label>
+                    <label className="pdf-watermark-parameter">
+                      <span>旋轉角度</span>
+                      <div>
+                        <FreeNumberInput
+                          value={pdfWatermarkAngle}
+                          ariaLabel="浮水印旋轉角度"
+                          min={PDF_WATERMARK_ANGLE_RANGE[0]}
+                          max={PDF_WATERMARK_ANGLE_RANGE[1]}
+                          precision={0}
+                          onCommit={(value) => {
+                            setPdfWatermarkAngle(normalizePDFInteger(
+                              value,
+                              DEFAULT_PDF_WATERMARK_ANGLE,
+                              PDF_WATERMARK_ANGLE_RANGE,
+                            ));
+                          }}
+                        />
+                        <span>°</span>
+                      </div>
+                    </label>
+                    <label className="pdf-watermark-parameter opacity">
+                      <span>透明度</span>
+                      <div>
+                        <input
+                          type="range"
+                          min={PDF_WATERMARK_OPACITY_RANGE[0]}
+                          max={PDF_WATERMARK_OPACITY_RANGE[1]}
+                          value={pdfWatermarkOpacity}
+                          onChange={(event) => {
+                            const normalized = normalizePDFInteger(
+                              event.target.value,
+                              DEFAULT_PDF_WATERMARK_OPACITY,
+                              PDF_WATERMARK_OPACITY_RANGE,
+                            );
+                            setPdfWatermarkOpacity(normalized);
+                          }}
+                        />
+                        <FreeNumberInput
+                          value={pdfWatermarkOpacity}
+                          ariaLabel="浮水印透明度"
+                          min={PDF_WATERMARK_OPACITY_RANGE[0]}
+                          max={PDF_WATERMARK_OPACITY_RANGE[1]}
+                          precision={0}
+                          onCommit={(value) => {
+                            setPdfWatermarkOpacity(normalizePDFInteger(
+                              value,
+                              DEFAULT_PDF_WATERMARK_OPACITY,
+                              PDF_WATERMARK_OPACITY_RANGE,
+                            ));
+                          }}
+                        />
+                        <span>%</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+                <div className="pdf-watermark-border-toggle">
+                  <label className="appearance-toggle">
+                    <input
+                      type="checkbox"
+                      checked={pdfWatermarkShowBorder}
+                      onChange={(event) => setPdfWatermarkShowBorder(event.target.checked)}
+                    />
+                    <span className="appearance-toggle-track" aria-hidden="true" />
+                    <span>顯示圖樣邊框（測試浮水印位置）</span>
+                  </label>
+                  <small>啟用後，每個浮水印圖樣會顯示紅色虛線邊框。</small>
+                </div>
+                <div className="pdf-settings-summary">
+                  <strong>輸出規則</strong>
+                  <span>
+                    {pdfWatermarkWidth}×{pdfWatermarkHeight} px 圖樣、
+                    {pdfWatermarkFontSize} px 字級、1.5 行高、每張一組文字＋日期，
+                    文字旋轉 {pdfWatermarkAngle}°，圖樣保持水平平鋪。
+                  </span>
+                  <span>文字色彩 #C0C0C0，整體透明度 {pdfWatermarkOpacity}%，置於正文最上層。</span>
+                  <span>版權與浮水印只套用於 PDF，不影響 HTML、Markdown 或 DOCX。</span>
                 </div>
               </section>
               <section

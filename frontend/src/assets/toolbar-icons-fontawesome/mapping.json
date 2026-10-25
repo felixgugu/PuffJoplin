@@ -1,0 +1,260 @@
+[
+  {
+    "position": 1,
+    "label": "表情符號",
+    "icon": "face-smile",
+    "file": "svg/face-smile.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/face-smile.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 2,
+    "label": "標題",
+    "icon": "heading",
+    "file": "svg/heading.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/heading.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 3,
+    "label": "粗體",
+    "icon": "bold",
+    "file": "svg/bold.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/bold.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 4,
+    "label": "斜體",
+    "icon": "italic",
+    "file": "svg/italic.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/italic.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 5,
+    "label": "刪除線",
+    "icon": "strikethrough",
+    "file": "svg/strikethrough.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/strikethrough.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 6,
+    "label": "文字顏色",
+    "icon": "font",
+    "file": "svg/font.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/font.svg",
+    "origin": "Font Awesome Free Classic Solid",
+    "note": "以 font 對應文字顏色；顏色底線由介面 CSS 呈現"
+  },
+  {
+    "position": 7,
+    "label": "連結",
+    "icon": "link",
+    "file": "svg/link.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/link.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 8,
+    "label": "項目清單",
+    "icon": "list-ul",
+    "file": "svg/list-ul.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/list-ul.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 9,
+    "label": "編號清單",
+    "icon": "list-ol",
+    "file": "svg/list-ol.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/list-ol.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 10,
+    "label": "待辦清單",
+    "icon": "list-check",
+    "file": "svg/list-check.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/list-check.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 11,
+    "label": "引用",
+    "icon": "quote-right",
+    "file": "svg/quote-right.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/quote-right.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 12,
+    "label": "水平分隔線",
+    "icon": "minus",
+    "file": "svg/minus.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/minus.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 13,
+    "label": "程式碼區塊",
+    "icon": "file-code",
+    "file": "svg/file-code.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/file-code.svg",
+    "origin": "Font Awesome Free Classic Solid",
+    "note": "程式碼區塊使用檔案程式碼圖示，與原圖外觀不同"
+  },
+  {
+    "position": 14,
+    "label": "行內程式碼",
+    "icon": "file-code-regular-full",
+    "file": "svg/file-code-regular-full.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/regular/file-code.svg",
+    "origin": "Font Awesome Free Classic Regular"
+  },
+  {
+    "position": 15,
+    "label": "上傳",
+    "icon": "cloud-arrow-up",
+    "file": "svg/cloud-arrow-up.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/cloud-arrow-up.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 16,
+    "label": "表格",
+    "icon": "table",
+    "file": "svg/table.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/table.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 17,
+    "label": "復原",
+    "icon": "rotate-left",
+    "file": "svg/rotate-left.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/rotate-left.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 18,
+    "label": "重做",
+    "icon": "rotate-right",
+    "file": "svg/rotate-right.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/rotate-right.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 19,
+    "label": "向上",
+    "icon": "arrow-up",
+    "file": "svg/arrow-up.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/arrow-up.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 20,
+    "label": "向下",
+    "icon": "arrow-down",
+    "file": "svg/arrow-down.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/arrow-down.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 21,
+    "label": "搜尋",
+    "icon": "magnifying-glass",
+    "file": "svg/magnifying-glass.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/magnifying-glass.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 22,
+    "label": "即見即所得",
+    "icon": "mode-wysiwyg",
+    "file": "svg/mode-wysiwyg.svg",
+    "source": "依使用者截圖重畫",
+    "origin": "custom"
+  },
+  {
+    "position": 23,
+    "label": "即時渲染",
+    "icon": "mode-instant-render",
+    "file": "svg/mode-instant-render.svg",
+    "source": "依使用者截圖重畫",
+    "origin": "custom"
+  },
+  {
+    "position": 24,
+    "label": "原始碼模式",
+    "icon": "code",
+    "file": "svg/code.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/code.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 25,
+    "label": "分割視窗／側欄",
+    "icon": "table-columns",
+    "file": "svg/table-columns.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/table-columns.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 26,
+    "label": "預覽",
+    "icon": "eye",
+    "file": "svg/eye.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/eye.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 27,
+    "label": "全螢幕",
+    "icon": "expand",
+    "file": "svg/expand.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/expand.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 28,
+    "label": "減少縮排",
+    "icon": "outdent",
+    "file": "svg/outdent.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/outdent.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 29,
+    "label": "增加縮排",
+    "icon": "indent",
+    "file": "svg/indent.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/indent.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 30,
+    "label": "向前插入",
+    "icon": "arrow-up-long",
+    "file": "svg/arrow-up-long.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/arrow-up-long.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 31,
+    "label": "向後插入",
+    "icon": "arrow-down-long",
+    "file": "svg/arrow-down-long.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/arrow-down-long.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 32,
+    "label": "大綱",
+    "icon": "list",
+    "file": "svg/list.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/list.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  }
+]

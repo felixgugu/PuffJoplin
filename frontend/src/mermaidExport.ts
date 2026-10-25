@@ -12,6 +12,12 @@ export interface RenderedMermaidImage {
   height: number;
 }
 
+type MermaidImageRenderer = (
+  code: string,
+  format: MermaidImageFormat,
+  signal?: AbortSignal,
+) => Promise<RenderedMermaidImage>;
+
 const mermaidScriptSelector = 'script[data-puffjoplin-mermaid]';
 const mermaidMaximumWidth = 1600;
 const mermaidMaximumHeight = 4000;
@@ -220,6 +226,65 @@ export async function renderMermaidImage(
     width: outputWidth,
     height: outputHeight,
   };
+}
+
+export async function replaceMermaidCodeBlocksWithImages(
+  html: string,
+  sourceCodes: readonly string[] = [],
+  signal?: AbortSignal,
+  renderer: MermaidImageRenderer = renderMermaidImage,
+): Promise<string> {
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  const usedBlocks = new Set<Element>();
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>(
+    '.language-mermaid, pre > code.language-mermaid',
+  ));
+  const normalizeCode = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const source = sourceCodes
+    .map((code) => code.trim())
+    .filter(Boolean);
+  const blocks = source.length > 0
+    ? source.map((code) => {
+        const candidate = candidates.find((element) => {
+          const block = element.closest('pre') ?? element;
+          return !usedBlocks.has(block);
+        });
+        if (candidate) {
+          const block = candidate.closest('pre') ?? candidate;
+          usedBlocks.add(block);
+          return { block, code };
+        }
+        const matchedPre = Array.from(document.querySelectorAll('pre')).find((pre) => {
+          if (usedBlocks.has(pre)) return false;
+          return normalizeCode(pre.textContent || '').includes(normalizeCode(code));
+        });
+        if (matchedPre) usedBlocks.add(matchedPre);
+        return { block: matchedPre ?? null, code };
+      })
+    : candidates.map((element) => {
+        const block = element.closest('pre') ?? element;
+        const codeElement = block.querySelector('code');
+        return {
+          block,
+          code: block.getAttribute('data-code') || codeElement?.textContent || block.textContent || '',
+        };
+      });
+  let index = 0;
+  for (const { block, code: rawCode } of blocks) {
+    signal?.throwIfAborted();
+    const code = rawCode.trim();
+    if (!code) continue;
+    const image = await renderer(code, 'png', signal);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'mermaid-export-image';
+    const element = document.createElement('img');
+    element.src = 'data:image/png;base64,' + bytesToBase64(image.data);
+    element.alt = `Mermaid 圖表 ${++index}`;
+    wrapper.appendChild(element);
+    if (block) block.replaceWith(wrapper);
+    else document.body.appendChild(wrapper);
+  }
+  return document.body.innerHTML;
 }
 
 export function bytesToBase64(data: Uint8Array): string {

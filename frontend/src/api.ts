@@ -7,6 +7,7 @@ import type {
   NotebookDocxExport,
   Note,
   NoteExportRequest,
+  NoteInfoField,
   NoteInput,
   NotePage,
   NoteQuery,
@@ -85,6 +86,8 @@ export const api = {
   getNote: (id: string) => invoke<Note>('GetNote', id),
   createNote: (notebookId: string, title = '', body = '') => invoke<Note>('CreateNote', notebookId, title, body),
   updateNote: (input: NoteInput) => invoke<Note>('UpdateNote', input),
+  setNoteAdditionalInfo: (noteId: string, fields: NoteInfoField[]) =>
+    invoke<NoteInfoField[]>('SetNoteAdditionalInfo', noteId, fields),
   moveNote: (id: string, notebookId: string) => invoke<Note>('MoveNote', id, notebookId),
   setNotePinned: (id: string, pinned: boolean) => invoke<void>('SetNotePinned', id, pinned),
   setNoteTodo: (id: string, isTodo: boolean, todoDue: number, todoCompleted: number) =>

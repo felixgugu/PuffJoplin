@@ -21,8 +21,11 @@
 | 統一稱呼 | 程式對應 | 說明 |
 |---|---|---|
 | 目前位置 | `.titlebar-context` | 顯示目前檢視名稱與筆記數。 |
-| 全域搜尋框 | `.titlebar-search` | 搜尋全部筆記。 |
-| 搜尋範圍 | `.titlebar-search-scope` | 切換「全部筆記本」或「目前目錄含子目錄」。 |
+| 全域搜尋框 | `.titlebar-search` | 固定高度的跨筆記搜尋列，包含搜尋選項、文字輸入、大小寫、完整單詞與清除控制。 |
+| 搜尋選項按鈕 | `.search-options-trigger` | 開啟整合式搜尋選項面板，並顯示目前是全部或目前目錄。 |
+| 搜尋選項面板 | `.search-options-menu` | Fluent 浮層，切換筆記本範圍與「標題＋內文」或「只搜尋標題」。 |
+| 大小寫切換 | `.search-filter-toggle` 的 `Aa` | 切換全域搜尋是否區分大小寫。 |
+| 完整單詞切換 | `.search-whole-word` | 切換英文與數字的完整單詞比對；連續中文視為完整詞段。 |
 | 佈景按鈕 | `.titlebar-tool` 的第一個按鈕 | 切換深色／亮色模式。 |
 | 設定按鈕 | `.titlebar-tool` 的設定按鈕 | 開啟「設定」視窗。 |
 | 視窗控制區 | `.window-actions` | 最小化、最大化／還原、關閉。 |
@@ -60,7 +63,8 @@
 | 筆記拖曳 | `.note-card[draggable="true"]` | 將筆記拖到筆記本樹以變更目錄。 |
 | 筆記本放置目標 | `.notebook-row.drop-target` | 拖曳筆記時可接受的筆記本目錄。 |
 | 空清單提示 | `.empty-list` | 沒有筆記或搜尋無結果時顯示。 |
-| **筆記卡片右鍵選單** | `.note-context-menu` | 筆記卡片右鍵操作；實體 Markdown 筆記另有複製檔案路徑與檔案總管定位。 |
+| **筆記卡片右鍵選單** | `.note-context-menu` | 筆記卡片的釘選、匯出、移動、Todo、實體檔案與垃圾桶操作。 |
+| 筆記匯出子選單 | `.note-context-export-menu` | 從筆記卡片右鍵選單展開 PDF、HTML、Markdown、DOCX、Mermaid SVG／PNG。 |
 
 ## 筆記編輯區
 
@@ -89,7 +93,8 @@
 | 原始碼行號 | `.cm-gutters`、`.cm-lineNumbers` | CodeMirror 原始碼模式左側的行號；可在設定視窗的「原始碼行號」開關切換。 |
 | 原始碼折疊控制 | `.cm-foldGutter`、`.puff-fold-marker` | 在可折疊的 Markdown 標題、清單、引用、程式碼與表格左側顯示收合／展開按鈕。 |
 | 原始碼折疊佔位符 | `.cm-foldPlaceholder` | 內容折疊後顯示的膠囊狀省略標記，點擊可展開。 |
-| 編輯工具列 | `.vditor-toolbar` | 標題、粗體、清單、附件、復原、模式切換等工具。 |
+| 編輯工具列 | `.vditor-toolbar` | 標題、粗體、清單、附件、復原、模式切換等工具；圖示由 Font Awesome registry 提供。 |
+| 工具列 SVG | `.puff-toolbar-svg` | 由 `toolbarIcons.ts` 載入並內嵌的 Font Awesome SVG，使用 `currentColor` 跟隨佈景。 |
 | 上一頁按鈕 | `.vditor-toolbar` 的 `page-prev` | 將目前筆記內容向上捲動約一個可視頁面；快捷鍵為 `Alt+←`。 |
 | 下一頁按鈕 | `.vditor-toolbar` 的 `page-next` | 將目前筆記內容向下捲動約一個可視頁面；快捷鍵為 `Alt+→`。 |
 | 文字顏色按鈕 | `.vditor-toolbar` 的 `text-color` | 開啟 16 色文字顏色面板。 |
@@ -112,6 +117,7 @@
 | 標籤管理選單 | `.tag-editor-popover` | 從標籤膠囊列向上展開的標籤清單。 |
 | 標籤管理列 | `.tag-editor-item` | 選單中的單一 `#Name` 與右側 `X`。 |
 | 新標籤輸入 | `.tag-editor-new input` | 標籤管理選單底部的「輸入新的標籤」。 |
+| **附加資訊按鈕** | `.note-info-trigger` | 位於標籤膠囊列右側，開啟「筆記附加資訊 Dialog」。 |
 | 附件按鈕 | `.attachment-trigger` | 顯示「附件 N」，用來開啟附件清單。 |
 | 附件選單 | `.attachment-popover` | 向上展開的附件清單；每列可開啟或另存。 |
 | 筆記底部操作區 | `.editor-footer-actions` | 筆記底部列右側的附件、字元、日期、儲存狀態與刪除操作。 |
@@ -125,20 +131,29 @@
 
 | 統一稱呼 | 程式對應 | 說明 |
 |---|---|---|
-| 筆記本右鍵選單 | `.notebook-context-menu` | 重新命名、新增子筆記本、匯入、JEX／Markdown／DOCX 匯出與刪除。 |
-| 直接管理筆記本右鍵選單 | `.notebook-context-menu` 搭配 `.notebook-row.is-managed` | 新增子資料夾、重新整理、在檔案總管顯示、Markdown／DOCX 匯出與停止管理；不提供匯入、JEX 或一般刪除。 |
+| 筆記本右鍵選單 | `.notebook-context-menu` | 重新命名、新增子筆記本、匯入、Markdown 匯出與刪除。 |
+| 直接管理筆記本右鍵選單 | `.notebook-context-menu` 搭配 `.notebook-row.is-managed` | 新增子資料夾、重新整理、在檔案總管顯示、Markdown 匯出與停止管理；不提供匯入、JEX、DOCX 或一般刪除。 |
 | Markdown 目錄匯出 | 「匯出 Markdown 目錄…」 | 選擇目的目錄後直接寫出 `.md`；圖片放 `images/`，其它附件放 `resources/`。 |
-| DOCX 匯出 | 「匯出 DOCX…」 | 將所選筆記本及子筆記本合併為一個 Word 文件，並內嵌本機附件；Mermaid fenced blocks 會先轉成 PNG 再嵌入。 |
-| 筆記右鍵選單 | `.note-context-menu` | 提供筆記的「移至筆記本」入口。 |
+| 筆記右鍵選單 | `.note-context-menu` | 依筆記狀態提供釘選、匯出、移動、Todo、移至垃圾桶；垃圾桶內提供還原與永久刪除。 |
 | 待辦到期日對話框 | `.todo-due-dialog` | 設定或清除目前待辦筆記的到期日。 |
+| 筆記附加資訊 Dialog | `.note-info-dialog` | 編輯目前筆記的 12 個 PDF 封面參數名稱與值。 |
 | 筆記本名稱對話框 | `.notebook-name-dialog` | 新增最上層／子筆記本與重新命名筆記本的統一輸入視窗。 |
 | 筆記本選擇器 | `.note-move-dialog` | 搜尋完整目錄路徑並移動筆記。 |
 | 通知提示 | `.toast` | 操作成功或失敗的短暫提示。 |
 | 匯入進度浮層 | `.progress-overlay` | 匯入期間的進度顯示。 |
 | 第一次啟動匯入視窗 | `.onboarding-card` | 偵測 Joplin profile 後顯示的匯入提示。 |
 | 設定視窗 | `.modal-card.settings-modal` | 加寬的分頁式設定視窗，頁首、分類列與版本底列固定，內容區獨立捲動。 |
-| 設定分頁列 | `.settings-tabs` | 在「外觀」、「快捷鍵」與「資料」三個設定分頁間切換。 |
+| 設定分頁列 | `.settings-tabs` | 在「外觀」、「PDF」、「快捷鍵」與「資料」四個設定分頁間切換。 |
 | 設定內容區 | `.settings-content` | 顯示目前設定分頁的可捲動內容。 |
+| 設定最大化按鈕 | `.settings-window-actions` | 設定視窗右上角的最大化／還原與關閉控制；最大化只放大設定 Dialog。 |
+| PDF 匯出設定 | `.settings-pdf` | 設定 PDF 封面、裝飾總開關、每頁頁尾版權文字、浮水印文字與可調圖樣參數。 |
+| 封面設計器 | `.pdf-cover-designer` | PDF 設定頁中的封面啟用、A4 預覽、變數清單與屬性面板。 |
+| A4 封面畫布 | `.pdf-cover-canvas` | 可拖曳封面變數並顯示目前筆記資料的預覽畫布。 |
+| 封面邊距參考框 | `.pdf-cover-margin-guide` | 顯示上 25.4 mm、左右各 19 mm、下 12.5 mm 的虛線頁面邊距；只供設計對齊，不輸出 PDF。 |
+| 封面多選工具列 | `.pdf-cover-bulk-actions` | 顯示已選數量、文字間距與左／中對齊批次操作。 |
+| 封面變數啟用鈕 | `.pdf-cover-visibility-toggle` | 控制單一封面變數是否輸出；眼睛圖示表示目前狀態。 |
+| PDF 裝飾開關 | `.pdf-settings-toggles` | 分別控制版權宣告頁尾與浮水印，預設為頁尾開啟、浮水印關閉。 |
+| PDF 浮水印 | `.pdf-watermark-layer` | 使用設定文字與匯出日期產生透明 SVG pattern；尺寸、字級、透明度與旋轉角度均可調。 |
 | 原始碼行號開關 | `.source-lines-field`、`.appearance-toggle` | 設定頁中控制 CodeMirror 原始碼行號的 Fluent 切換開關。 |
 | 鍵盤快捷鍵清單 | `.settings-shortcuts` | 設定頁中的唯讀快捷鍵參考，依應用程式、搜尋、格式化、編輯器與原始碼操作分組。 |
 | 資料與儲存分頁 | `.settings-data` | 將匯入功能與本機儲存／Markdown 匯出分成獨立功能區。 |
@@ -152,7 +167,7 @@
 - 「Tag 區」統一對應「標籤膠囊列」，展開後的浮層稱為「標籤管理選單」，不要與左側導覽欄的「標籤雲」混用。
 - 「附件區」統一對應「附件按鈕」與「附件選單」，不包含筆記內嵌圖片。
 - 「筆記卡片右鍵選單」對應筆記清單中的單篇筆記操作，不與「筆記本右鍵選單」混用。
-- 「直接管理筆記本」指以磁碟目錄為資料來源的模式，不是匯入；其筆記檔案與 `images/` 目錄以檔案系統為準，SQLite 只保存索引、標籤、待辦與釘選。
+- 「直接管理筆記本」指以磁碟目錄為資料來源的模式，不是匯入；其筆記檔案與 `images/` 目錄以檔案系統為準，SQLite 保存索引、標籤、待辦、釘選與 PDF 封面附加資訊。
 - 「停止管理」只移除 PuffJoplin 中的目錄索引，不會刪除磁碟檔案；不要稱為「刪除資料夾」。
 - 「上方」優先改說「應用標題列」或「筆記標題列」；「下方」優先改說「筆記底部列」。
 - 「右側」優先改說「筆記編輯區」或「筆記操作區」，避免與視窗控制區混淆。
@@ -168,8 +183,12 @@
 - 主介面樣式：`frontend/src/styles.css`
 - 混合 Markdown 編輯器整合：`frontend/src/VditorEditor.tsx`
 - CodeMirror 原始碼編輯器：`frontend/src/codeMirrorSource.ts`
+- Vditor 工具列圖示 registry：`frontend/src/toolbarIcons.ts`
+- 工具列 SVG 與授權：`frontend/src/assets/toolbar-icons-fontawesome/`
 - 筆記內搜尋面板：`frontend/src/EditorFindPanel.tsx`
 - 筆記內搜尋與取代核心：`frontend/src/editorSearch.ts`
+- 筆記附加資訊 Dialog：`frontend/src/NoteAdditionalInfoDialog.tsx`
+- PDF 封面設計器：`frontend/src/PdfCoverDesigner.tsx`
 - 圖稿右鍵選單：`frontend/src/EditorMediaContextMenu.tsx`
 - 文字顏色面板：`frontend/src/TextColorPalette.tsx`
 - 文字顏色核心：`frontend/src/textColor.ts`

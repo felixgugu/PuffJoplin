@@ -20,6 +20,9 @@ export type UiIconName =
   | 'pin'
   | 'copy'
   | 'calendar'
+  | 'download'
+  | 'eye'
+  | 'eye-off'
   | 'close'
   | 'sun'
   | 'moon'
@@ -159,6 +162,29 @@ export default function UiIcon({ name, filled = false, className = '' }: UiIconP
         <>
           <rect x="3" y="4.5" width="14" height="12.25" rx="2.25" />
           <path d="M6.5 2.75v3.5M13.5 2.75v3.5M3 8.25h14" />
+        </>
+      );
+      break;
+    case 'download':
+      content = (
+        <>
+          <path d="M10 3v9.25M5.75 8.25 10 12.5l4.25-4.25" />
+          <path d="M3.25 16.75h13.5" />
+        </>
+      );
+      break;
+    case 'eye':
+      content = (
+        <>
+          <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z" />
+          <circle cx="10" cy="10" r="2.25" />
+        </>
+      );
+      break;
+    case 'eye-off':
+      content = (
+        <>
+          <path d="M3 3l14 14M7.2 5.45A8.6 8.6 0 0 1 10 5c4.7 0 7.5 5 7.5 5a12 12 0 0 1-2.4 2.95M12.8 14.55A8.6 8.6 0 0 1 10 15c-4.7 0-7.5-5-7.5-5a12.2 12.2 0 0 1 3.1-3.45" />
         </>
       );
       break;

@@ -28,6 +28,8 @@ func TestBuildNoteExportHTMLSanitizesAndEmbedsResources(t *testing.T) {
 	}
 	content := `<h1>標題</h1><script>alert(1)</script>` +
 		`<p><img src="/resources/` + resource.ID + `" alt="photo"></p>` +
+		`<p><img class="mermaid-export-image" alt="Mermaid 圖表" src="data:image/png;base64,iVBORw0KGgo="></p>` +
+		`<a href="data:text/html,unsafe">unsafe data link</a>` +
 		`<p><a href="https://example.com/resources/` + resource.ID + `">remote</a></p>` +
 		`<p><a href=":/` + resource.ID + `">attachment</a></p>`
 
@@ -40,6 +42,12 @@ func TestBuildNoteExportHTMLSanitizesAndEmbedsResources(t *testing.T) {
 	}
 	if !strings.Contains(document, "data:image/png;base64,") {
 		t.Fatal("local resource was not embedded")
+	}
+	if !strings.Contains(document, `class="mermaid-export-image"`) {
+		t.Fatal("Mermaid PNG was removed by sanitization")
+	}
+	if strings.Contains(document, `href="data:text/html`) {
+		t.Fatal("unsafe data link survived HTML sanitization")
 	}
 	if !strings.Contains(document, "https://example.com/resources/"+resource.ID) {
 		t.Fatal("remote resource URL was rewritten")
@@ -119,6 +127,28 @@ func TestRenderNotePDFVisualSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	coverFields := defaultNoteInfoFields()
+	coverValues := map[string]string{
+		"companyName":    "Puff 科技股份有限公司",
+		"documentNumber": "DOC-2026-001",
+		"version":        "v1.0",
+		"classification": "內部使用",
+		"subtitle":       "PuffJoplin 桌面文件系統",
+		"scope":          "2026 年度 PDF 匯出驗證",
+		"preparedByUnit": "產品研發部",
+		"preparedBy":     "Felix",
+		"submittedTo":    "文件管理委員會",
+		"issueDate":      "2026-10-25",
+		"footerText":     "本文件限指定對象使用，未經書面同意不得複製或轉交。",
+	}
+	for index := range coverFields {
+		coverFields[index].Value = coverValues[coverFields[index].Key]
+	}
+	savedCoverFields, err := store.SetNoteAdditionalInfo(context.Background(), note.ID, coverFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note.AdditionalInfo = savedCoverFields
 	imageData, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lK3Q6wAAAABJRU5ErkJggg==")
 	if err != nil {
 		t.Fatal(err)
@@ -132,13 +162,42 @@ func TestRenderNotePDFVisualSmoke(t *testing.T) {
 		`<h2>第一章</h2><p>段落內容。</p>` +
 		`<table><thead><tr><th>項目</th><th>狀態</th></tr></thead><tbody><tr><td>PDF</td><td>完成</td></tr></tbody></table>` +
 		`<pre><code>fmt.Println("hello")</code></pre><h2>第二章</h2><p>結尾。</p>`
-	document, err := buildNoteExportHTML(context.Background(), store, note, content)
+	for index := 0; index < 35; index++ {
+		content += `<p>用來驗證固定頁尾與滿版浮水印會重複到後續頁面的段落內容。</p>`
+	}
+	decorations := buildPDFExportDecorations(
+		"© 2026 PuffJoplin",
+		"CONFIDENTIAL",
+		time.Date(2026, 10, 25, 0, 0, 0, 0, time.Local),
+		pdfWatermarkConfig{
+			Width: 900, Height: 600, FontSize: 42, Opacity: 10, Angle: -45, ShowBorder: true,
+		},
+	)
+	coverDesign := defaultPDFCoverDesign()
+	coverDesign.Enabled = true
+	coverHTML, err := buildPDFCoverHTML(note, coverDesign, decorations.FooterCopyright)
 	if err != nil {
 		t.Fatal(err)
 	}
+	decorations.CoverHTML = coverHTML
+	document, err := buildNoteExportHTML(context.Background(), store, note, content, decorations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if htmlOutput := strings.TrimSpace(os.Getenv("PUFFJOPLIN_PDF_SMOKE_HTML")); htmlOutput != "" {
+		if err := os.WriteFile(htmlOutput, []byte(document), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := renderNotePDF(ctx, document, output, browserPath); err != nil {
+	if err := renderNotePDFWithCoverSplit(
+		ctx,
+		document,
+		output,
+		browserPath,
+		decorations.FooterCopyright,
+	); err != nil {
 		t.Fatal(err)
 	}
 }

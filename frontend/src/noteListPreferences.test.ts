@@ -4,9 +4,12 @@ import {
   DEFAULT_NOTE_SORT_DIRECTION,
   DEFAULT_TODO_SORT_BY,
   DEFAULT_TODO_STATUS,
+  DEFAULT_SEARCH_FIELD,
   parseNoteSortBy,
   parseNoteSortDirection,
+  parseSearchField,
   parseSearchScope,
+  parseSearchToggle,
   parseShowNoteSummary,
   parseTodoStatus,
   parseTodoSortBy,
@@ -47,6 +50,16 @@ describe('note list preferences', () => {
     expect(parseSearchScope(null)).toBe('all');
     expect(parseSearchScope('current')).toBe('current');
     expect(parseSearchScope('unknown')).toBe('all');
+  });
+
+  it('defaults search rules to title and body, case-insensitive matching', () => {
+    expect(DEFAULT_SEARCH_FIELD).toBe('all');
+    expect(parseSearchField(null)).toBe('all');
+    expect(parseSearchField('title')).toBe('title');
+    expect(parseSearchField('unknown')).toBe('all');
+    expect(parseSearchToggle(null)).toBe(false);
+    expect(parseSearchToggle('false')).toBe(false);
+    expect(parseSearchToggle('true')).toBe(true);
   });
 
   it('uses due-date ascending and open todos as defaults', () => {

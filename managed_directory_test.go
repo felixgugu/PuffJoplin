@@ -63,6 +63,15 @@ func TestManagedDirectoryIndexesMarkdownAndIgnoresOtherFiles(t *testing.T) {
 			t.Fatalf("non-markdown file was indexed: %#v", note)
 		}
 	}
+	managedNote, err := store.GetNote(ctx, page.Items[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := defaultNoteInfoFields()
+	info[0].Value = "目錄筆記公司"
+	if _, err := store.SetNoteAdditionalInfo(ctx, managedNote.ID, info); err != nil {
+		t.Fatal(err)
+	}
 
 	extraPath := filepath.Join(root, "Projects", "Extra.md")
 	if err := os.WriteFile(extraPath, []byte("Extra"), 0o644); err != nil {
@@ -71,6 +80,13 @@ func TestManagedDirectoryIndexesMarkdownAndIgnoresOtherFiles(t *testing.T) {
 	report, err = store.RefreshManagedDirectory(ctx, report.NotebookID)
 	if err != nil || report.Notes != 3 {
 		t.Fatalf("refresh after create = %#v, %v", report, err)
+	}
+	managedNote, err = store.GetNote(ctx, managedNote.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if managedNote.AdditionalInfo[0].Value != "目錄筆記公司" {
+		t.Fatalf("managed additional info was lost: %#v", managedNote.AdditionalInfo)
 	}
 	if err := os.Remove(extraPath); err != nil {
 		t.Fatal(err)

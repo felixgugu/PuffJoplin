@@ -141,6 +141,85 @@ describe('stylesheet structure', () => {
     expect(compactTitleWeight).toBe('400');
   });
 
+  it('forces inactive settings tab panels to stay hidden', () => {
+    let hiddenDisplay = '';
+    let hiddenDisplayImportant = false;
+    root.walkRules((rule) => {
+      if (rule.selector.replace(/\s+/g, ' ') !== '.settings-content > [hidden]') return;
+      const display = rule.nodes.find(
+        (node) => node.type === 'decl' && node.prop === 'display',
+      );
+      if (display?.type === 'decl') {
+        hiddenDisplay = display.value;
+        hiddenDisplayImportant = display.important;
+      }
+    });
+
+    expect(hiddenDisplay).toBe('none');
+    expect(hiddenDisplayImportant).toBe(true);
+  });
+
+  it('shows every cover variable without pushing properties to the bottom', () => {
+    let sizingRuleFound = false;
+    root.walkRules((rule) => {
+      if (rule.selector.replace(/\s+/g, ' ')
+        !== '.settings-modal.is-maximized .pdf-cover-variable-list') return;
+      const declarations = new Set(
+        rule.nodes
+          .filter((node) => node.type === 'decl')
+          .map((node) => node.prop + '|' + node.value),
+      );
+      sizingRuleFound = declarations.has('flex|none') &&
+        declarations.has('max-height|none') &&
+        declarations.has('min-height|0');
+    });
+    expect(sizingRuleFound).toBe(true);
+  });
+
+  it('keeps cover margin guides non-interactive and out of print output', () => {
+    let pointerEvents = '';
+    let printHidden = false;
+    root.walkRules((rule) => {
+      if (rule.selector === '.pdf-cover-margin-guide') {
+        const declaration = rule.nodes.find(
+          (node) => node.type === 'decl' && node.prop === 'pointer-events',
+        );
+        if (declaration?.type === 'decl') pointerEvents = declaration.value;
+      }
+      if (
+        atRuleContext(rule) === '@media print' &&
+        rule.selector === '.pdf-cover-margin-guide'
+      ) {
+        printHidden = rule.nodes.some(
+          (node) => node.type === 'decl' && node.prop === 'display' && node.value === 'none',
+        );
+      }
+    });
+    expect(pointerEvents).toBe('none');
+    expect(printHidden).toBe(true);
+  });
+
+  it('keeps the global search field height stable and its placeholder secondary', () => {
+    const declarationsBySelector = new Map<string, Map<string, string>>();
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const selector = rule.selector.replace(/\s+/g, ' ');
+      const declarations = declarationsBySelector.get(selector) ?? new Map<string, string>();
+      for (const node of rule.nodes) {
+        if (node.type === 'decl') declarations.set(node.prop, node.value);
+      }
+      declarationsBySelector.set(selector, declarations);
+    });
+
+    expect(declarationsBySelector.get('.titlebar-search')?.get('height')).toBe('34px');
+    expect(
+      declarationsBySelector.get('.titlebar-search input::placeholder')?.get('font-size'),
+    ).toBe('0.8rem');
+    expect(
+      declarationsBySelector.get('.titlebar-search .search-clear-button')?.get('height'),
+    ).toBe('22px');
+  });
+
   it('keeps editor actions in the footer with a compact hoverable export menu', () => {
     const selectors: string[] = [];
     let headingPadding = '';
@@ -208,9 +287,9 @@ describe('stylesheet structure', () => {
   });
 
   it('exposes editor modes as direct toolbar buttons and hides the dropdown controller', () => {
-    const wysiwygIndex = componentSource.indexOf("name: 'wysiwyg-mode'");
-    const instantIndex = componentSource.indexOf("name: 'ir-mode'");
-    const sourceIndex = componentSource.indexOf("name: 'source-mode'");
+    const wysiwygIndex = componentSource.indexOf("toolbarIconItem('wysiwyg-mode')");
+    const instantIndex = componentSource.indexOf("toolbarIconItem('ir-mode')");
+    const sourceIndex = componentSource.indexOf("toolbarIconItem('source-mode')");
     expect(wysiwygIndex).toBeGreaterThan(-1);
     expect(instantIndex).toBeGreaterThan(wysiwygIndex);
     expect(sourceIndex).toBeGreaterThan(instantIndex);
@@ -237,6 +316,42 @@ describe('stylesheet structure', () => {
     });
     expect(controllerDisplay).toBe('none');
     expect(activeBackground).toBe('var(--accent-soft)');
+  });
+
+  it('keeps custom mode strokes visible and renders text color directly in red', () => {
+    let modeFill = '';
+    let modeStroke = '';
+    let modeStrokeWidth = '';
+    let textColor = '';
+    let textColorShadow = '';
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const declarations = new Map(
+        rule.nodes
+          .filter((node) => node.type === 'decl')
+          .map((node) => [node.prop, node.value]),
+      );
+      if (rule.selectors.some((selector) =>
+        selector.includes('data-type="wysiwyg-mode"') &&
+        selector.includes('.puff-toolbar-svg'))) {
+        modeFill = declarations.get('fill') || modeFill;
+        modeStroke = declarations.get('stroke') || modeStroke;
+        modeStrokeWidth = declarations.get('stroke-width') || modeStrokeWidth;
+      }
+      if (rule.selectors.some((selector) =>
+        selector.includes('.puff-text-color-toolbar button') &&
+        !selector.includes(':hover') &&
+        !selector.includes(':focus'))) {
+        textColor = declarations.get('color') || textColor;
+        textColorShadow = declarations.get('box-shadow') || textColorShadow;
+      }
+    });
+
+    expect(modeFill).toBe('none');
+    expect(modeStroke).toBe('currentColor');
+    expect(modeStrokeWidth).toBe('1.8');
+    expect(textColor).toBe('#e53935');
+    expect(textColorShadow).toBe('none');
   });
 
   it('keeps the pinned-note affordance icon-only and aligned with the title', () => {

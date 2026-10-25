@@ -139,6 +139,82 @@ func TestStoreNoteLifecycleSearchAndTags(t *testing.T) {
 	}
 }
 
+func TestListNotesSearchRules(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	notebooks, err := store.ListNotebooks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(title, body string) {
+		t.Helper()
+		if _, err := store.CreateNote(ctx, notebooks[0].ID, title, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create("Alpha report", "Coffee in the body")
+	create("A cat sat", "CAT in the body")
+	create("concatenate", "scatter")
+	create("這是中文筆記本", "連續中文內容")
+	create("中文，筆記", "標點分隔")
+	create("100% done", "under_score")
+
+	titles := func(query NoteQuery) string {
+		t.Helper()
+		query.View = "all"
+		query.SortBy = "title"
+		query.SortDirection = "asc"
+		query.Limit = 20
+		page, err := store.ListNotes(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			items = append(items, item.Title)
+		}
+		return strings.Join(items, ",")
+	}
+
+	if got := titles(NoteQuery{Search: "alpha", SearchField: "title"}); got != "Alpha report" {
+		t.Fatalf("case-insensitive title search = %q", got)
+	}
+	if got := titles(NoteQuery{
+		Search: "alpha", SearchField: "title", SearchCaseSensitive: true,
+	}); got != "" {
+		t.Fatalf("case-sensitive title search = %q", got)
+	}
+	if got := titles(NoteQuery{Search: "Coffee"}); got != "Alpha report" {
+		t.Fatalf("title and body search = %q", got)
+	}
+	if got := titles(NoteQuery{Search: "Coffee", SearchField: "title"}); got != "" {
+		t.Fatalf("title-only search = %q", got)
+	}
+	if got := titles(NoteQuery{Search: "cat"}); !strings.Contains(got, "concatenate") {
+		t.Fatalf("substring search = %q", got)
+	}
+	if got := titles(NoteQuery{Search: "cat", SearchWholeWord: true}); got != "A cat sat" {
+		t.Fatalf("whole-word search = %q", got)
+	}
+	if got := titles(NoteQuery{
+		Search: "Cat", SearchWholeWord: true, SearchCaseSensitive: true,
+	}); got != "" {
+		t.Fatalf("case-sensitive whole-word search = %q", got)
+	}
+	if got := titles(NoteQuery{Search: "中文筆記", SearchWholeWord: true}); got != "" {
+		t.Fatalf("continuous CJK whole-word search = %q", got)
+	}
+	if got := titles(NoteQuery{Search: "中文", SearchWholeWord: true}); got != "中文，筆記" {
+		t.Fatalf("punctuation-delimited CJK whole-word search = %q", got)
+	}
+	if got := titles(NoteQuery{Search: "100%", SearchField: "title"}); got != "100% done" {
+		t.Fatalf("literal percent search = %q", got)
+	}
+	if got := titles(NoteQuery{Search: "under_score"}); got != "100% done" {
+		t.Fatalf("literal underscore search = %q", got)
+	}
+}
+
 func TestTrashNoteRejectsMissingNote(t *testing.T) {
 	store := newTestStore(t)
 	if err := store.TrashNote(context.Background(), "missing"); err == nil {
