@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,8 @@ type App struct {
 	managedMu       sync.Mutex
 	managedWatchers map[string]*managedRootWatcher
 }
+
+var previewImageInvalidFilenamePattern = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
 
 func NewApp() *App {
 	dataDir := resolveDataDir()
@@ -852,6 +856,47 @@ func (a *App) SaveResourceAs(id string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+func (a *App) SaveImageAs(filename string, dataBase64 string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(dataBase64))
+	if err != nil {
+		return "", fmt.Errorf("圖片資料格式錯誤: %w", err)
+	}
+	if len(data) == 0 {
+		return "", errors.New("圖片資料是空的")
+	}
+	filename = sanitizePreviewImageFilename(filename)
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "另存圖片",
+		DefaultFilename: filename,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "PNG 圖片", Pattern: "*.png"},
+		},
+	})
+	if err != nil || path == "" {
+		return path, err
+	}
+	if !strings.HasSuffix(strings.ToLower(path), ".png") {
+		path += ".png"
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", fmt.Errorf("儲存圖片失敗: %w", err)
+	}
+	return path, nil
+}
+
+func sanitizePreviewImageFilename(filename string) string {
+	filename = filepath.Base(strings.TrimSpace(filename))
+	filename = previewImageInvalidFilenamePattern.ReplaceAllString(filename, "-")
+	filename = strings.Trim(filename, " .")
+	if filename == "" {
+		filename = "PuffJoplin-image.png"
+	}
+	if strings.EqualFold(filepath.Ext(filename), ".png") {
+		return filename
+	}
+	return strings.TrimSuffix(filename, filepath.Ext(filename)) + ".png"
 }
 
 func (a *App) OpenExternal(value string) error {

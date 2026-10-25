@@ -9,13 +9,22 @@ import {
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from './api';
-import { CodeMirrorSource } from './codeMirrorSource';
+import {
+  CodeMirrorSource,
+  type CodeMirrorLineActivation,
+} from './codeMirrorSource';
 import { installDiagramGuards } from './diagramGuards';
 import { parseEditorMode, type EditorMode, type EditorPreviewMode } from './editorTabs';
 import EditorFindPanel from './EditorFindPanel';
 import EditorMediaContextMenu, {
   type EditorMediaContextTarget,
 } from './EditorMediaContextMenu';
+import SourceLinePreview from './SourceLinePreview';
+import {
+  findSourceLinePreview,
+  type SourcePreviewLine,
+  type SourcePreviewTarget,
+} from './sourceLineTarget';
 import TextColorPalette from './TextColorPalette';
 import { toolbarIcon, type ToolbarIconName } from './toolbarIcons';
 import { EditorViewportController } from './editorViewportController';
@@ -234,6 +243,10 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const [findActiveIndex, setFindActiveIndex] = useState(0);
   const [mediaContext, setMediaContext] = useState<EditorMediaContextTarget | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
+  const [sourceLinePreview, setSourceLinePreview] = useState<{
+    target: SourcePreviewTarget;
+    anchor: SourcePreviewLine['anchor'];
+  } | null>(null);
   const [textColorPalette, setTextColorPalette] = useState<{ x: number; y: number } | null>(null);
   const [textColor, setTextColor] = useState(TEXT_COLORS[10].value);
   const findQueryInputRef = useRef<HTMLInputElement | null>(null);
@@ -266,6 +279,19 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   resourcesRef.current = resources;
   valueRef.current = value;
   noteTitleRef.current = noteTitle;
+
+  const closeSourceLinePreview = useCallback(() => {
+    setSourceLinePreview(null);
+  }, []);
+
+  const handleSourceLineActivate = useCallback((line: CodeMirrorLineActivation | null) => {
+    if (!line) return;
+    const markdown = sourceEditorRef.current?.getValue();
+    if (!markdown) return;
+    const target = findSourceLinePreview(markdown, line.lineNumber);
+    if (!target) return;
+    setSourceLinePreview({ target, anchor: line.anchor });
+  }, []);
 
   const setFindActiveMatch = useCallback((index: number) => {
     findActiveIndexRef.current = index;
@@ -1174,6 +1200,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
             refreshPageNavigationRef.current();
             refreshEditorViewportRef.current();
           },
+          onLineActivate: handleSourceLineActivate,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1440,7 +1467,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       }
       host.replaceChildren();
     };
-  }, [handleEditorContextMenu, noteID, uploadToken]);
+  }, [handleEditorContextMenu, handleSourceLineActivate, noteID, uploadToken]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1481,6 +1508,19 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   }, [active, closeFindPanel]);
 
   useEffect(() => {
+    if (!sourceLinePreview) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeSourceLinePreview();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [closeSourceLinePreview, sourceLinePreview]);
+
+  useEffect(() => {
     if (value === lastValueRef.current) return undefined;
     const editor = editorRef.current;
     if (!editor || !readyRef.current) return undefined;
@@ -1503,6 +1543,13 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   return (
     <div ref={shellRef} className="vditor-editor-shell">
       <div ref={hostRef} className="vditor-editor-host" aria-label="Markdown 編輯器" />
+      {active && sourceLinePreview && (
+        <SourceLinePreview
+          target={sourceLinePreview.target}
+          anchor={sourceLinePreview.anchor}
+          onClose={closeSourceLinePreview}
+        />
+      )}
       {findOpen && (
         <EditorFindPanel
           query={findQuery}

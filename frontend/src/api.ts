@@ -127,6 +127,8 @@ export const api = {
   openResource: (id: string) => invoke<void>('OpenResource', id),
   revealResource: (id: string) => invoke<void>('RevealResource', id),
   saveResourceAs: (id: string) => invoke<string>('SaveResourceAs', id),
+  saveImageAs: (filename: string, dataBase64: string) =>
+    invoke<string>('SaveImageAs', filename, dataBase64),
   openExternal: (url: string) => invoke<void>('OpenExternal', url),
   openDataFolder: () => invoke<void>('OpenDataFolder'),
   confirm: (title: string, message: string) => invoke<boolean>('Confirm', title, message),

@@ -93,6 +93,7 @@
 | 原始碼行號 | `.cm-gutters`、`.cm-lineNumbers` | CodeMirror 原始碼模式左側的行號；可在設定視窗的「原始碼行號」開關切換。 |
 | 原始碼折疊控制 | `.cm-foldGutter`、`.puff-fold-marker` | 在可折疊的 Markdown 標題、清單、引用、程式碼與表格左側顯示收合／展開按鈕。 |
 | 原始碼折疊佔位符 | `.cm-foldPlaceholder` | 內容折疊後顯示的膠囊狀省略標記，點擊可展開。 |
+| 原始碼浮動預覽 | `.source-line-preview` | 原始碼模式點擊本機圖片行或 Mermaid 開頭 fence 後顯示的圖片／流程圖檢視器；支援拖曳、縮放、平移、最大化與關閉。 |
 | 編輯工具列 | `.vditor-toolbar` | 標題、粗體、清單、附件、復原、模式切換等工具；圖示由 Font Awesome registry 提供。 |
 | 工具列 SVG | `.puff-toolbar-svg` | 由 `toolbarIcons.ts` 載入並內嵌的 Font Awesome SVG，使用 `currentColor` 跟隨佈景。 |
 | 上一頁按鈕 | `.vditor-toolbar` 的 `page-prev` | 將目前筆記內容向上捲動約一個可視頁面；快捷鍵為 `Alt+←`。 |

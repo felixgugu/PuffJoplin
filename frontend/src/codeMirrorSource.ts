@@ -142,6 +142,17 @@ export interface CodeMirrorSelection {
   to: number;
 }
 
+export interface CodeMirrorLineActivation {
+  lineNumber: number;
+  text: string;
+  anchor: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  };
+}
+
 export function markdownHeadingText(source: string, level: number): string {
   const safeLevel = Math.max(1, Math.min(6, Math.round(level)));
   return source
@@ -158,6 +169,7 @@ export interface CodeMirrorSourceOptions {
   onChange: (markdown: string) => void;
   onBlur: () => void;
   onScroll: () => void;
+  onLineActivate?: (line: CodeMirrorLineActivation | null) => void;
 }
 
 export class CodeMirrorSource {
@@ -167,6 +179,7 @@ export class CodeMirrorSource {
 
   private readonly textarea: HTMLTextAreaElement;
   private readonly onChange: (markdown: string) => void;
+  private readonly onLineActivate?: (line: CodeMirrorLineActivation | null) => void;
   private readonly lineNumbersCompartment = new Compartment();
   private applyingExternal = false;
   private destroyed = false;
@@ -174,6 +187,7 @@ export class CodeMirrorSource {
   constructor(options: CodeMirrorSourceOptions) {
     this.textarea = options.textarea;
     this.onChange = options.onChange;
+    this.onLineActivate = options.onLineActivate;
     this.element = document.createElement('div');
     this.element.className = 'puff-codemirror-source';
     const preview = Array.from(options.parent.children).find(
@@ -212,11 +226,36 @@ export class CodeMirrorSource {
             blur: () => {
               if (!this.destroyed) options.onBlur();
             },
+            mousedown: (event, view) => {
+              if (
+                event.button !== 0 ||
+                !(event.target instanceof Node) ||
+                !view.contentDOM.contains(event.target)
+              ) {
+                return;
+              }
+              const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
+              if (position === null) return;
+              const line = view.state.doc.lineAt(position);
+              const coordinates = view.coordsAtPos(line.from);
+              if (!coordinates) return;
+              this.onLineActivate?.({
+                lineNumber: line.number,
+                text: line.text,
+                anchor: {
+                  left: event.clientX,
+                  right: event.clientX,
+                  top: coordinates.top,
+                  bottom: coordinates.bottom,
+                },
+              });
+            },
           }),
           EditorView.updateListener.of((update) => {
             if (!update.docChanged && !update.selectionSet) return;
             this.syncMirror();
             if (!update.docChanged || this.applyingExternal) return;
+            this.onLineActivate?.(null);
             this.onChange(update.state.doc.toString());
           }),
           keymap.of([
@@ -231,7 +270,10 @@ export class CodeMirrorSource {
     });
     this.scrollElement = this.view.scrollDOM;
 
-    this.view.scrollDOM.addEventListener('scroll', options.onScroll, { passive: true });
+    this.view.scrollDOM.addEventListener('scroll', () => {
+      this.onLineActivate?.(null);
+      options.onScroll();
+    }, { passive: true });
     this.syncMirror();
   }
 
@@ -367,6 +409,7 @@ export class CodeMirrorSource {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.onLineActivate?.(null);
     this.view.destroy();
     this.element.remove();
   }
