@@ -9,6 +9,7 @@ import {
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from './api';
+import { CodeMirrorSource } from './codeMirrorSource';
 import { installDiagramGuards } from './diagramGuards';
 import { parseEditorMode, type EditorMode, type EditorPreviewMode } from './editorTabs';
 import EditorFindPanel from './EditorFindPanel';
@@ -37,7 +38,6 @@ import { extractMermaidBlocks } from './mermaidBlocks';
 import { bytesToBase64, renderMermaidImage } from './mermaidExport';
 import { pageScrollDistance, pageScrollState } from './pageNavigation';
 import { toEditorMarkdown, toStoredMarkdown } from './resourceUrls';
-import { SourceHighlightOverlay } from './sourceHighlightOverlay';
 import {
   applySourceTextColor,
   clearTextColorHighlights,
@@ -118,7 +118,33 @@ function activateEditorMode(editor: Vditor, mode: EditorMode) {
     `button[data-mode="${mode}"]`,
   );
   if (editor.getCurrentMode() !== mode) target?.click();
-  editor.setPreviewMode('editor');
+  if (mode === 'sv') {
+    editor.setPreviewMode('editor');
+  } else {
+    if (editor.vditor?.options.preview) editor.vditor.options.preview.mode = 'editor';
+    const preview = editor.vditor?.preview?.element;
+    if (preview) preview.style.display = 'none';
+    const hideRichModePreview = () => {
+      if (editor.getCurrentMode() !== mode || editor.getCurrentMode() === 'sv') return;
+      const previewButton = editor.vditor?.toolbar?.elements?.['preview']
+        ?.querySelector<HTMLButtonElement>('button[data-type="preview"]');
+      if (previewButton?.classList.contains('vditor-menu--current')) return;
+      if (editor.vditor?.options.preview) editor.vditor.options.preview.mode = 'editor';
+      const currentPreview = editor.vditor?.preview?.element;
+      if (currentPreview) {
+        currentPreview.style.display = 'none';
+        const content = currentPreview.parentElement;
+        if (content) content.dataset.puffPreviewHidden = 'true';
+        currentPreview.closest<HTMLElement>('.vditor-editor-host')?.setAttribute(
+          'data-puff-preview-hidden',
+          'true',
+        );
+      }
+      window.dispatchEvent(new Event('resize'));
+    };
+    window.requestAnimationFrame(hideRichModePreview);
+    window.setTimeout(hideRichModePreview, 50);
+  }
   syncEditorModeButtons(editor);
 }
 
@@ -146,6 +172,7 @@ interface VditorEditorProps {
   storageKind: 'database' | 'directory';
   resources: Resource[];
   theme: 'light' | 'dark';
+  showSourceLineNumbers: boolean;
   onChange: (value: string) => void;
   onBlur: () => void;
   onModeChange: (mode: EditorMode) => void;
@@ -167,6 +194,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   storageKind,
   resources,
   theme,
+  showSourceLineNumbers,
   onChange,
   onBlur,
   onModeChange,
@@ -180,6 +208,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const initialModeRef = useRef(initialMode);
   const initialPreviewModeRef = useRef(initialPreviewMode);
   const themeRef = useRef(theme);
+  const showSourceLineNumbersRef = useRef(showSourceLineNumbers);
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
   const onModeChangeRef = useRef(onModeChange);
@@ -218,9 +247,12 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const openTextColorPaletteRef = useRef<(anchor: HTMLElement) => void>(() => undefined);
   const refreshTextColorMarkersRef = useRef<() => void>(() => undefined);
   const refreshEditorViewportRef = useRef<() => void>(() => undefined);
-  const refreshSourceHighlightRef = useRef<() => void>(() => undefined);
+  const sourceEditorRef = useRef<CodeMirrorSource | null>(null);
+  const initializeSourceEditorRef = useRef<() => void>(() => undefined);
+  const refreshSourceEditorRef = useRef<() => void>(() => undefined);
 
   themeRef.current = theme;
+  showSourceLineNumbersRef.current = showSourceLineNumbers;
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
   onModeChangeRef.current = onModeChange;
@@ -260,6 +292,24 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     }
     const requestedIndex = resetActive ? 0 : findActiveIndexRef.current;
     if (editor.getCurrentMode() === 'sv') {
+      if (sourceEditorRef.current) {
+        const matches = findTextMatches(sourceEditorRef.current.getValue(), findQuery, {
+          matchCase: findMatchCase,
+          wholeWord: findWholeWord,
+        });
+        clearSearchHighlights();
+        findRangesRef.current = [];
+        findSourceMatchesRef.current = matches;
+        findSourceTextareaRef.current = null;
+        const index = matches.length === 0
+          ? 0
+          : Math.max(0, Math.min(requestedIndex, matches.length - 1));
+        setFindMatchCount(matches.length);
+        setFindActiveMatch(index);
+        const match = matches[index];
+        if (match) sourceEditorRef.current.selectRange(match.start, match.end);
+        return;
+      }
       const textarea = editor.vditor.sv?.element;
       if (!textarea) return;
       const matches = findTextMatches(textarea.value, findQuery, {
@@ -355,6 +405,11 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     }
     const index = (findActiveIndexRef.current + direction + count) % count;
     setFindActiveMatch(index);
+    if (editorRef.current?.getCurrentMode() === 'sv' && sourceEditorRef.current) {
+      const match = findSourceMatchesRef.current[index];
+      if (match) sourceEditorRef.current.selectRange(match.start, match.end);
+      return;
+    }
     if (findSourceTextareaRef.current) {
       revealSourceMatch(
         findSourceTextareaRef.current,
@@ -382,10 +437,18 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     const editor = editorRef.current;
     if (!editor || findMatchCount === 0) return;
     if (editor.getCurrentMode() === 'sv') {
-      const textarea = editor.vditor.sv?.element;
-      if (!textarea) return;
       const match = findSourceMatchesRef.current[findActiveIndexRef.current];
       if (!match) return;
+      if (sourceEditorRef.current) {
+        sourceEditorRef.current.replaceRange(match.start, match.end, findReplacement);
+        window.setTimeout(() => {
+          refreshFindRef.current(true);
+          findReplacementInputRef.current?.focus();
+        }, 30);
+        return;
+      }
+      const textarea = editor.vditor.sv?.element;
+      if (!textarea) return;
       textarea.setRangeText(findReplacement, match.start, match.end, 'end');
       dispatchEditorInput(textarea, findReplacement);
     } else {
@@ -416,6 +479,20 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     const editor = editorRef.current;
     if (!editor || findMatchCount === 0 || findReplacement === findQuery) return;
     if (editor.getCurrentMode() === 'sv') {
+      if (sourceEditorRef.current) {
+        sourceEditorRef.current.replaceRanges(
+          findSourceMatchesRef.current.map((match) => ({
+            from: match.start,
+            to: match.end,
+          })),
+          findReplacement,
+        );
+        window.setTimeout(() => {
+          refreshFindRef.current(true);
+          findReplacementInputRef.current?.focus();
+        }, 30);
+        return;
+      }
       const textarea = editor.vditor.sv?.element;
       if (!textarea) return;
       const matches = findSourceMatchesRef.current;
@@ -748,7 +825,11 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     if (!host) return undefined;
     let disposed = false;
     let fullscreenActive = false;
-    let sourceHighlightOverlay: SourceHighlightOverlay | null = null;
+    let codeMirrorSource: CodeMirrorSource | null = null;
+    let sourceVisibilityObserver: MutationObserver | null = null;
+    let sourcePreviewTimer: number | null = null;
+    let previewAllowedInRichMode = false;
+    let lastEditorMode: EditorMode | '' = '';
     readyRef.current = false;
     host.replaceChildren();
 
@@ -953,6 +1034,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       },
       after: () => {
         if (disposed) return;
+        initializeSourceEditorRef.current();
         readyRef.current = true;
         onModeChangeRef.current(editor.getCurrentMode());
         onPreviewModeChangeRef.current(currentEditorPreviewMode(editor));
@@ -962,6 +1044,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         if (currentValue !== toEditorMarkdown(initialValueRef.current, resourcesRef.current)) {
           applyingExternalValueRef.current = true;
           editor.setValue(currentValue, true);
+          sourceEditorRef.current?.setValue(currentValue);
           window.requestAnimationFrame(() => {
             applyingExternalValueRef.current = false;
           });
@@ -972,10 +1055,22 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         window.setTimeout(() => refreshPageNavigationRef.current(), 30);
         refreshTextColorMarkersRef.current();
         refreshEditorViewportRef.current();
-        refreshSourceHighlightRef.current();
+        refreshSourceEditorRef.current();
       },
       input: (markdown) => {
         if (!disposed && readyRef.current) {
+          const textarea = editor.vditor?.sv?.element;
+          if (editor.getCurrentMode() === 'sv' && textarea && sourceEditorRef.current) {
+            sourceEditorRef.current.setValue(
+              markdown,
+              { from: textarea.selectionStart, to: textarea.selectionEnd },
+            );
+            window.requestAnimationFrame(() => {
+              if (document.activeElement === textarea) {
+                sourceEditorRef.current?.focus();
+              }
+            });
+          }
           const stored = toStoredMarkdown(
             markdown,
             resourcesRef.current,
@@ -992,29 +1087,119 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       },
     });
     editorRef.current = editor;
-    const refreshSourceHighlight = () => {
+    const refreshSourceEditor = () => {
+      if (!codeMirrorSource) return;
       const textarea = editor.vditor?.sv?.element;
       if (!textarea) return;
-      if (!sourceHighlightOverlay) {
-        sourceHighlightOverlay = new SourceHighlightOverlay(textarea);
-      }
-      const visible = editor.getCurrentMode() === 'sv' &&
+      const mode = editor.getCurrentMode();
+      const modeChanged = mode !== lastEditorMode;
+      lastEditorMode = mode;
+      const visible = mode === 'sv' &&
         window.getComputedStyle(textarea).display !== 'none';
-      sourceHighlightOverlay.update(textarea.value, true);
-      sourceHighlightOverlay.setVisible(visible);
+      if (visible && codeMirrorSource.getValue() !== textarea.value) {
+        codeMirrorSource.setValue(textarea.value);
+      }
+      if (mode !== 'sv') {
+        if (modeChanged) previewAllowedInRichMode = false;
+        if (!previewAllowedInRichMode && editor.vditor?.preview?.element) {
+          if (editor.vditor.options.preview) editor.vditor.options.preview.mode = 'editor';
+          editor.vditor.preview.element.style.display = 'none';
+        }
+      } else {
+        previewAllowedInRichMode = false;
+      }
+      codeMirrorSource.setVisible(visible);
+      const content = codeMirrorSource.element.parentElement;
+      content?.classList.toggle('is-codemirror-active', visible);
+      if (content) {
+        if (mode === 'sv' || previewAllowedInRichMode) delete content.dataset.puffPreviewHidden;
+        else content.dataset.puffPreviewHidden = 'true';
+      }
+      if (mode === 'sv' || previewAllowedInRichMode) delete host.dataset.puffPreviewHidden;
+      else host.dataset.puffPreviewHidden = 'true';
     };
-    refreshSourceHighlightRef.current = refreshSourceHighlight;
-    refreshSourceHighlight();
-    const sourceVisibilityObserver = new MutationObserver(() => {
-      refreshSourceHighlightRef.current();
-    });
-    const sourceTextarea = editor.vditor?.sv?.element;
-    if (sourceTextarea) {
+    const initializeSourceEditor = () => {
+      if (codeMirrorSource) return;
+      const content = host.querySelector<HTMLElement>('.vditor-content');
+      const sourceTextarea = editor.vditor?.sv?.element;
+      if (!content || !sourceTextarea) return;
+      const nativeSetRangeText = sourceTextarea.setRangeText.bind(sourceTextarea);
+      const guardedSetRangeText = (
+        replacement: string,
+        start?: number,
+        end?: number,
+        selectionMode?: 'select' | 'start' | 'end' | 'preserve',
+      ) => {
+        if (start === undefined || end === undefined) {
+          nativeSetRangeText(replacement);
+          return;
+        }
+        const length = sourceTextarea.value.length;
+        const safeStart = Math.max(0, Math.min(start, length));
+        const safeEnd = Math.max(safeStart, Math.min(end, length));
+        nativeSetRangeText(
+          replacement,
+          safeStart,
+          safeEnd,
+          selectionMode || 'preserve',
+        );
+      };
+      sourceTextarea.setRangeText = guardedSetRangeText as HTMLTextAreaElement['setRangeText'];
+      try {
+        codeMirrorSource = new CodeMirrorSource({
+          parent: content,
+          textarea: sourceTextarea,
+          value: sourceTextarea.value,
+          showLineNumbers: showSourceLineNumbersRef.current,
+          onChange: (markdown) => {
+            const stored = toStoredMarkdown(
+              markdown,
+              resourcesRef.current,
+              storageKindRef.current,
+            );
+            lastValueRef.current = stored;
+            if (!applyingExternalValueRef.current) onChangeRef.current(stored);
+            if (sourcePreviewTimer !== null) window.clearTimeout(sourcePreviewTimer);
+            sourcePreviewTimer = window.setTimeout(() => {
+              sourcePreviewTimer = null;
+              if (disposed || editor.getCurrentMode() !== 'sv') return;
+              const preview = editor.vditor?.preview?.element;
+              if (!preview || window.getComputedStyle(preview).display === 'none') return;
+              editor.vditor?.preview?.render(editor.vditor);
+            }, 160);
+          },
+          onBlur: () => {
+            if (!disposed) onBlurRef.current();
+          },
+          onScroll: () => {
+            refreshPageNavigationRef.current();
+            refreshEditorViewportRef.current();
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? error.stack || '' : '';
+        void api.reportFrontendError(
+          `CodeMirror source initialization failed: ${message}`,
+          stack,
+          'codemirror-init',
+        );
+        refreshSourceEditorRef.current = () => undefined;
+        return;
+      }
+      sourceEditorRef.current = codeMirrorSource;
+      refreshSourceEditorRef.current = refreshSourceEditor;
+      refreshSourceEditor();
+      sourceVisibilityObserver = new MutationObserver(() => {
+        refreshSourceEditorRef.current();
+      });
       sourceVisibilityObserver.observe(sourceTextarea, {
         attributes: true,
         attributeFilter: ['style'],
       });
-    }
+    };
+    initializeSourceEditorRef.current = initializeSourceEditor;
+    initializeSourceEditor();
     const toolbar = editor.vditor?.toolbar?.element;
     if (toolbar) applyToolbarTitles(toolbar);
     const viewportController = new EditorViewportController(host);
@@ -1049,7 +1234,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       if (!editor.vditor) return null;
       const mode = editor.getCurrentMode();
       const candidates: Array<HTMLElement | null | undefined> = [
-        mode === 'sv' ? editor.vditor.sv?.element : undefined,
+        mode === 'sv' ? codeMirrorSource?.scrollElement : undefined,
         mode === 'wysiwyg' ? editor.vditor.wysiwyg?.element : undefined,
         mode === 'ir' ? editor.vditor.ir?.element : undefined,
         host.querySelector<HTMLElement>('.vditor-preview'),
@@ -1117,7 +1302,11 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         .then((resource) => {
           if (disposed || !readyRef.current || !editorRef.current) return;
           editorRef.current.insertMD(clipboardImageMarkdown(resource));
-          editorRef.current.focus();
+          if (editorRef.current.getCurrentMode() === 'sv' && sourceEditorRef.current) {
+            sourceEditorRef.current.focus();
+          } else {
+            editorRef.current.focus();
+          }
         })
         .catch((error: unknown) => {
           if (disposed || !readyRef.current || !editorRef.current) return;
@@ -1143,13 +1332,47 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     };
     const handleEditorClick = (event: Event) => {
       const target = event.target;
+      const headingAction = target instanceof Element
+        ? target.closest<HTMLButtonElement>('button[data-tag^="h"]')
+        : null;
+      const headingLevel = Number.parseInt(headingAction?.dataset.tag?.slice(1) || '', 10);
+      if (headingAction &&
+        Number.isFinite(headingLevel) &&
+        editor.getCurrentMode() === 'sv' &&
+        codeMirrorSource) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        codeMirrorSource.applyHeading(headingLevel);
+        const panel = headingAction.parentElement;
+        if (panel) panel.style.display = 'none';
+        return;
+      }
+      const sourceHistoryAction = target instanceof Element
+        ? target.closest<HTMLButtonElement>('button[data-type="undo"], button[data-type="redo"]')
+        : null;
+      if (sourceHistoryAction &&
+        editor.getCurrentMode() === 'sv' &&
+        codeMirrorSource) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (sourceHistoryAction.dataset.type === 'undo') codeMirrorSource.undo();
+        else codeMirrorSource.redo();
+        return;
+      }
+      const previewAction = target instanceof Element
+        ? target.closest<HTMLButtonElement>('button[data-type="preview"]')
+        : null;
+      if (previewAction && codeMirrorSource?.element.parentElement) {
+        previewAllowedInRichMode = true;
+        delete codeMirrorSource.element.parentElement.dataset.puffPreviewHidden;
+        delete host.dataset.puffPreviewHidden;
+      }
       const modeButton = target instanceof Element
         ? target.closest<HTMLButtonElement>('button[data-mode]')
         : null;
       const requestedMode = parseEditorMode(modeButton?.dataset.mode);
-      if (requestedMode && requestedMode !== 'sv') {
-        sourceHighlightOverlay?.setVisible(false);
-      }
+      if (requestedMode) previewAllowedInRichMode = false;
+      if (requestedMode && requestedMode !== 'sv') codeMirrorSource?.setVisible(false);
       const modeControl = target instanceof Element
         ? target.closest(
           'button[data-mode], button[data-type="both"], button[data-type="preview"]',
@@ -1166,7 +1389,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           schedulePageNavigationRefresh();
           scheduleTextColorMarkers();
           refreshEditorViewportRef.current();
-          refreshSourceHighlightRef.current();
+          refreshSourceEditorRef.current();
           onModeChangeRef.current(editor.getCurrentMode());
           onPreviewModeChangeRef.current(currentEditorPreviewMode(editor));
           syncEditorModeButtons(editor);
@@ -1185,16 +1408,18 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       readyRef.current = false;
       editorRef.current = null;
       if (findRefreshTimer !== null) window.clearTimeout(findRefreshTimer);
+      if (sourcePreviewTimer !== null) window.clearTimeout(sourcePreviewTimer);
       if (pageNavigationFrame !== null) window.cancelAnimationFrame(pageNavigationFrame);
       if (textColorFrame !== null) window.cancelAnimationFrame(textColorFrame);
       refreshPageNavigationRef.current = () => undefined;
       scrollEditorPageRef.current = () => undefined;
       refreshTextColorMarkersRef.current = () => undefined;
       refreshEditorViewportRef.current = () => undefined;
-      refreshSourceHighlightRef.current = () => undefined;
-      sourceVisibilityObserver.disconnect();
-      sourceHighlightOverlay?.destroy();
-      sourceHighlightOverlay = null;
+      refreshSourceEditorRef.current = () => undefined;
+      initializeSourceEditorRef.current = () => undefined;
+      sourceVisibilityObserver?.disconnect();
+      sourceEditorRef.current = null;
+      codeMirrorSource?.destroy();
       viewportController.destroy();
       clearTextColorHighlights();
       fullscreenObserver.disconnect();
@@ -1225,13 +1450,17 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   }, [theme]);
 
   useEffect(() => {
+    sourceEditorRef.current?.setShowLineNumbers(showSourceLineNumbers);
+  }, [showSourceLineNumbers]);
+
+  useEffect(() => {
     const editor = editorRef.current;
     const host = hostRef.current;
     if (!editor || !host) return undefined;
     if (active) {
       const frame = window.requestAnimationFrame(() => {
         refreshEditorViewportRef.current();
-        refreshSourceHighlightRef.current();
+        refreshSourceEditorRef.current();
         window.dispatchEvent(new Event('resize'));
       });
       return () => window.cancelAnimationFrame(frame);
@@ -1257,7 +1486,9 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     const editor = editorRef.current;
     if (!editor || !readyRef.current) return undefined;
     applyingExternalValueRef.current = true;
-    editor.setValue(toEditorMarkdown(value, resources), true);
+    const markdown = toEditorMarkdown(value, resources);
+    editor.setValue(markdown, true);
+    sourceEditorRef.current?.setValue(markdown);
     lastValueRef.current = value;
     const frame = window.requestAnimationFrame(() => {
       applyingExternalValueRef.current = false;
@@ -1265,7 +1496,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       refreshPageNavigationRef.current();
       refreshTextColorMarkersRef.current();
       refreshEditorViewportRef.current();
-      refreshSourceHighlightRef.current();
+      refreshSourceEditorRef.current();
     });
     return () => window.cancelAnimationFrame(frame);
   }, [resources, value]);

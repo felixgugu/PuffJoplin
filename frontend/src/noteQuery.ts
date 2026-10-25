@@ -13,6 +13,7 @@ interface NoteQueryOptions {
   searchNotebookID: string;
   sortBy: NoteSortBy;
   sortDirection: NoteSortDirection;
+  todoStatus?: 'open' | 'completed' | 'all';
   limit?: number;
   offset?: number;
 }
@@ -24,6 +25,11 @@ export function buildNoteListQuery(options: NoteQueryOptions): NoteQuery {
   let tagId = options.view.kind === 'tag' ? options.view.id : '';
 
   if (searching) {
+    if (options.view.kind === 'todo') {
+      queryView = 'todo';
+      notebookId = options.searchScope === 'current' ? options.searchNotebookID : '';
+      tagId = '';
+    } else
     if (options.searchScope === 'current' && options.searchNotebookID) {
       queryView = options.view.kind === 'trash' ? 'trash' : 'notebook';
       notebookId = options.searchNotebookID;
@@ -39,6 +45,7 @@ export function buildNoteListQuery(options: NoteQueryOptions): NoteQuery {
     view: queryView,
     notebookId,
     tagId,
+    todoStatus: options.view.kind === 'todo' ? options.todoStatus || 'open' : undefined,
     search: options.search,
     sortBy: options.sortBy,
     sortDirection: options.sortDirection,

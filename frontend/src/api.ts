@@ -87,6 +87,8 @@ export const api = {
   updateNote: (input: NoteInput) => invoke<Note>('UpdateNote', input),
   moveNote: (id: string, notebookId: string) => invoke<Note>('MoveNote', id, notebookId),
   setNotePinned: (id: string, pinned: boolean) => invoke<void>('SetNotePinned', id, pinned),
+  setNoteTodo: (id: string, isTodo: boolean, todoDue: number, todoCompleted: number) =>
+    invoke<void>('SetNoteTodo', id, isTodo, todoDue, todoCompleted),
   trashNote: (id: string) => invoke<void>('TrashNote', id),
   restoreNote: (id: string) => invoke<void>('RestoreNote', id),
   deleteNotePermanently: (id: string) => invoke<void>('DeleteNotePermanently', id),

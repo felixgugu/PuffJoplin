@@ -102,6 +102,7 @@ type NoteQuery struct {
 	View          string `json:"view"`
 	NotebookID    string `json:"notebookId"`
 	TagID         string `json:"tagId"`
+	TodoStatus    string `json:"todoStatus"`
 	Search        string `json:"search"`
 	SortBy        string `json:"sortBy"`
 	SortDirection string `json:"sortDirection"`

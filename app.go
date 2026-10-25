@@ -370,6 +370,18 @@ func (a *App) SetNotePinned(id string, pinned bool) error {
 	return nil
 }
 
+func (a *App) SetNoteTodo(id string, isTodo bool, todoDue int64, todoCompleted int64) error {
+	store, err := a.readyStore()
+	if err != nil {
+		return err
+	}
+	if err := store.SetNoteTodo(a.ctx, id, isTodo, todoDue, todoCompleted); err != nil {
+		return err
+	}
+	runtime.EventsEmit(a.ctx, "notes.changed", id)
+	return nil
+}
+
 func (a *App) TrashNote(id string) error {
 	store, err := a.readyStore()
 	if err != nil {

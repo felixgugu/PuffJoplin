@@ -38,7 +38,7 @@ const atRuleContext = (node: PostcssNode): string => {
 };
 
 const isExternalClass = (name: string) =>
-  name.startsWith('vditor') || name.startsWith('hljs-');
+  name.startsWith('vditor') || name.startsWith('hljs-') || name.startsWith('cm-');
 
 describe('stylesheet structure', () => {
   it('does not retain selectors for removed component classes', () => {
@@ -178,24 +178,33 @@ describe('stylesheet structure', () => {
     expect(componentSource).not.toContain('單一自包含檔案');
   });
 
-  it('keeps the Vditor toolbar above the highlighted source textarea', () => {
+  it('keeps the Vditor toolbar above the CodeMirror source editor', () => {
     let toolbarZIndex = '';
-    let sourceZIndex = '';
+    let sourceDisplay = '';
+    let mirrorPointerEvents = '';
     root.walkRules((rule) => {
       if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
-      const zIndex = rule.nodes.find(
-        (node) => node.type === 'decl' && node.prop === 'z-index',
+      const declarations = new Map(
+        rule.nodes
+          .filter((node) => node.type === 'decl')
+          .map((node) => [node.prop, node.value]),
       );
-      if (zIndex?.type !== 'decl') return;
       if (rule.selectors.includes('.vditor-editor-host .vditor-toolbar')) {
-        toolbarZIndex = zIndex.value;
+        toolbarZIndex = declarations.get('z-index') || '';
       }
-      if (rule.selectors.includes('.vditor-editor-host .vditor-sv.puff-source-textarea')) {
-        sourceZIndex = zIndex.value;
+      if (rule.selectors.includes('.puff-codemirror-source.is-visible')) {
+        sourceDisplay = declarations.get('display') || '';
+      }
+      if (rule.selectors.includes(
+        '.vditor-editor-host .vditor-content.is-codemirror-active > .vditor-sv',
+      )) {
+        mirrorPointerEvents = declarations.get('pointer-events') || '';
       }
     });
 
-    expect(Number(toolbarZIndex)).toBeGreaterThan(Number(sourceZIndex));
+    expect(toolbarZIndex).toBe('20');
+    expect(sourceDisplay).toBe('flex');
+    expect(mirrorPointerEvents).toBe('none');
   });
 
   it('exposes editor modes as direct toolbar buttons and hides the dropdown controller', () => {

@@ -102,7 +102,9 @@ export class EditorViewportController {
   }
 
   private syncSplitter(content: HTMLElement) {
-    const editorPane = content.querySelector<HTMLElement>('.vditor-sv');
+    const editorPane = content.querySelector<HTMLElement>(
+      '.puff-codemirror-source.is-visible, .vditor-sv',
+    );
     const preview = content.querySelector<HTMLElement>('.vditor-preview');
     const active = !!editorPane && !!preview && isVisible(editorPane) && isVisible(preview);
     if (!active) {
@@ -140,7 +142,9 @@ export class EditorViewportController {
   private restoreSplitter() {
     if (!this.splitActive) return;
     const content = this.contentElement();
-    const editorPane = content?.querySelector<HTMLElement>('.vditor-sv');
+    const editorPane = content?.querySelector<HTMLElement>(
+      '.puff-codemirror-source, .vditor-sv',
+    );
     const preview = content?.querySelector<HTMLElement>('.vditor-preview');
     if (editorPane) {
       editorPane.style.flex = this.savedEditorFlex;
@@ -214,7 +218,7 @@ export class EditorViewportController {
 
   private scrollTargets(content: HTMLElement): HTMLElement[] {
     const candidates = Array.from(content.querySelectorAll<HTMLElement>(
-      '.vditor-sv, .vditor-ir, .vditor-ir pre, .vditor-wysiwyg pre.vditor-reset, .vditor-preview',
+      '.puff-codemirror-source .cm-scroller, .vditor-sv, .vditor-ir, .vditor-ir pre, .vditor-wysiwyg pre.vditor-reset, .vditor-preview',
     ));
     return candidates.filter((element, index) =>
       candidates.indexOf(element) === index && isScrollable(element));

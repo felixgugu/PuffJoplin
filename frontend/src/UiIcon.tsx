@@ -1,5 +1,8 @@
 export type UiIconName =
   | 'all-notes'
+  | 'todo'
+  | 'todo-checkbox'
+  | 'todo-checkbox-checked'
   | 'trash'
   | 'panel-close'
   | 'panel-open'
@@ -16,6 +19,7 @@ export type UiIconName =
   | 'locate'
   | 'pin'
   | 'copy'
+  | 'calendar'
   | 'close'
   | 'sun'
   | 'moon'
@@ -35,6 +39,25 @@ export default function UiIcon({ name, filled = false, className = '' }: UiIconP
         <>
           <rect x="4.25" y="2.75" width="11.5" height="14.5" rx="2" />
           <path d="M7 6.25h6M7 9.25h6M7 12.25h3.5" />
+        </>
+      );
+      break;
+    case 'todo':
+      content = (
+        <>
+          <rect x="3.25" y="3.25" width="13.5" height="13.5" rx="3" />
+          <path d="m6.5 10 2.25 2.25 4.75-5" />
+        </>
+      );
+      break;
+    case 'todo-checkbox':
+      content = <rect x="3.25" y="3.25" width="13.5" height="13.5" rx="3.25" />;
+      break;
+    case 'todo-checkbox-checked':
+      content = (
+        <>
+          <rect x="3.25" y="3.25" width="13.5" height="13.5" rx="3.25" />
+          <path d="m6.5 10 2.25 2.25 4.75-5" />
         </>
       );
       break;
@@ -128,6 +151,14 @@ export default function UiIcon({ name, filled = false, className = '' }: UiIconP
         <>
           <rect x="7" y="7" width="9.5" height="10" rx="1.75" />
           <path d="M13 7V5.5a1.75 1.75 0 0 0-1.75-1.75h-7A1.75 1.75 0 0 0 2.5 5.5v7A1.75 1.75 0 0 0 4.25 14H7" />
+        </>
+      );
+      break;
+    case 'calendar':
+      content = (
+        <>
+          <rect x="3" y="4.5" width="14" height="12.25" rx="2.25" />
+          <path d="M6.5 2.75v3.5M13.5 2.75v3.5M3 8.25h14" />
         </>
       );
       break;

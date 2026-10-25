@@ -718,6 +718,8 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 		sortExpression = "n.title COLLATE NOCASE"
 	case "created":
 		sortExpression = "n.created_at"
+	case "due":
+		sortExpression = "n.todo_due"
 	case "", "updated":
 		sortExpression = "n.updated_at"
 	default:
@@ -744,6 +746,19 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 	case "tag":
 		where = append(where, "n.deleted_at = 0", "EXISTS (SELECT 1 FROM note_tags nt WHERE nt.note_id = n.id AND nt.tag_id = ?)")
 		args = append(args, query.TagID)
+	case "todo":
+		where = append(where, "n.deleted_at = 0", "n.is_todo = 1")
+		switch query.TodoStatus {
+		case "completed":
+			where = append(where, "n.todo_completed > 0")
+		case "all":
+		default:
+			where = append(where, "n.todo_completed = 0")
+		}
+		if strings.TrimSpace(query.NotebookID) != "" {
+			where = append(where, notebookSubtreeCondition)
+			args = append(args, query.NotebookID)
+		}
 	default:
 		where = append(where, "n.deleted_at = 0")
 	}
@@ -762,6 +777,19 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 	}
 
 	listArgs := append(append([]any{}, args...), query.Limit, query.Offset)
+	orderSQL := "n.is_pinned DESC, "
+	if query.View == "todo" {
+		orderSQL += "CASE WHEN n.todo_completed = 0 THEN 0 ELSE 1 END ASC, "
+		if sortBy == "due" {
+			orderSQL += "CASE WHEN n.todo_due = 0 THEN 1 ELSE 0 END ASC, " +
+				"n.todo_due " + sqlDirection + ", "
+		} else {
+			orderSQL += sortExpression + " " + sqlDirection + ", "
+		}
+	} else {
+		orderSQL += sortExpression + " " + sqlDirection + ", "
+	}
+	orderSQL += "n.title COLLATE NOCASE ASC, n.id ASC"
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT n.id, n.notebook_id, f.title, n.title, n.body, n.is_todo, n.todo_due,
 		        n.todo_completed, n.is_conflict, n.is_pinned, n.created_at, n.updated_at, n.deleted_at,
@@ -770,7 +798,7 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 		 FROM notes n
 		 JOIN notebooks f ON f.id = n.notebook_id
 		 WHERE `+whereSQL+`
-		 ORDER BY n.is_pinned DESC, `+sortExpression+` `+sqlDirection+`, n.title COLLATE NOCASE ASC, n.id ASC
+		 ORDER BY `+orderSQL+`
 		 LIMIT ? OFFSET ?`,
 		listArgs...,
 	)
@@ -1011,6 +1039,26 @@ func (s *Store) MoveNote(ctx context.Context, id string, notebookID string) (Not
 
 func (s *Store) SetNotePinned(ctx context.Context, id string, pinned bool) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE notes SET is_pinned = ? WHERE id = ?`, boolInt(pinned), id)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return errors.New("筆記不存在")
+	}
+	return nil
+}
+
+func (s *Store) SetNoteTodo(
+	ctx context.Context,
+	id string,
+	isTodo bool,
+	todoDue int64,
+	todoCompleted int64,
+) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE notes SET is_todo = ?, todo_due = ?, todo_completed = ?, updated_at = ? WHERE id = ?`,
+		boolInt(isTodo), todoDue, todoCompleted, nowMillis(), id,
+	)
 	if err != nil {
 		return err
 	}

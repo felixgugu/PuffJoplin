@@ -253,6 +253,79 @@ func TestPinnedNotesSortBeforeEverySortMode(t *testing.T) {
 	}
 }
 
+func TestTodoViewsFiltersCompletesAndSortsByDueDate(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	notebooks, err := store.ListNotebooks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(title string) Note {
+		t.Helper()
+		note, err := store.CreateNote(ctx, notebooks[0].ID, title, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return note
+	}
+	overdue := create("Overdue")
+	future := create("Future")
+	undated := create("Undated")
+	completed := create("Completed")
+	normal := create("Normal")
+	for _, item := range []struct {
+		note      Note
+		due       int64
+		completed int64
+	}{
+		{overdue, 100, 0},
+		{future, 300, 0},
+		{undated, 0, 0},
+		{completed, 50, 200},
+	} {
+		if err := store.SetNoteTodo(ctx, item.note.ID, true, item.due, item.completed); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	titles := func(status string) string {
+		t.Helper()
+		page, err := store.ListNotes(ctx, NoteQuery{
+			View: "todo", TodoStatus: status, SortBy: "due", SortDirection: "asc", Limit: 20,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			items = append(items, item.Title)
+		}
+		return strings.Join(items, ",")
+	}
+	if got := titles("open"); got != "Overdue,Future,Undated" {
+		t.Fatalf("open todos = %q", got)
+	}
+	if got := titles("completed"); got != "Completed" {
+		t.Fatalf("completed todos = %q", got)
+	}
+	if got := titles("all"); got != "Overdue,Future,Undated,Completed" {
+		t.Fatalf("all todos = %q", got)
+	}
+
+	if err := store.SetNoteTodo(ctx, overdue.ID, false, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := titles("open"); got != "Future,Undated" {
+		t.Fatalf("open todos after cancel = %q", got)
+	}
+	if err := store.SetNoteTodo(ctx, normal.ID, true, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := titles("open"); got != "Future,Normal,Undated" {
+		t.Fatalf("open todos after conversion = %q", got)
+	}
+}
+
 func TestListNotesIncludesNotebookDescendants(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

@@ -26,6 +26,11 @@ import {
   type EditorTab,
   type EditorTabsState,
 } from './editorTabs';
+import {
+  parseShowSourceLineNumbers,
+  SOURCE_LINE_NUMBERS_KEY,
+} from './editorPreferences';
+import { KEYBOARD_SHORTCUT_GROUPS } from './keyboardShortcuts';
 import { onboardingDecision } from './onboarding';
 import { extractMermaidBlocks } from './mermaidBlocks';
 import {
@@ -45,10 +50,17 @@ import {
   NOTE_LIST_SUMMARY_KEY,
   NOTE_SORT_BY_KEY,
   NOTE_SORT_DIRECTION_KEY,
+  TODO_SORT_BY_KEY,
+  TODO_SORT_DIRECTION_KEY,
+  TODO_STATUS_KEY,
+  DEFAULT_TODO_SORT_DIRECTION,
+  DEFAULT_TODO_STATUS,
   parseNoteSortBy,
   parseNoteSortDirection,
   parseShowNoteSummary,
   parseSearchScope,
+  parseTodoStatus,
+  parseTodoSortBy,
   SEARCH_SCOPE_KEY,
   shouldExpandNoteList,
 } from './noteListPreferences';
@@ -63,7 +75,16 @@ import {
 } from './notebookTree';
 import { notebookAncestorIDs, notebookPath } from './notebookPath';
 import { formatTagLabel } from './tagFormatting';
-import { nextTodoState, todoActionLabel } from './noteTodo';
+import {
+  cancelTodo,
+  convertToTodo,
+  nextTodoState,
+  todoActionLabel,
+  todoDueClassName,
+  todoDueDateValue,
+  todoDueFromDateValue,
+  todoDueLabel,
+} from './noteTodo';
 import { buildNoteListQuery } from './noteQuery';
 import {
   BASE_FONT_SIZE_KEY,
@@ -93,6 +114,7 @@ import type {
   Resource,
   SearchScope,
   Tag,
+  TodoStatus,
   View,
 } from './types';
 
@@ -164,6 +186,10 @@ const saveStateLabel = {
 const noteDragMime = 'application/x-puffjoplin-note-id';
 
 type NoteExportAction = NoteExportFormat | `mermaid-${MermaidImageFormat}`;
+type TodoDueNote = Pick<
+  NoteSummary,
+  'id' | 'title' | 'isTodo' | 'todoDue' | 'todoCompleted'
+>;
 
 type NotebookDialogState = {
   mode: NotebookDialogMode;
@@ -173,6 +199,14 @@ type NotebookDialogState = {
   error: string;
   saving: boolean;
 };
+
+const SETTINGS_TABS = [
+  { id: 'appearance', label: '外觀' },
+  { id: 'shortcuts', label: '快捷鍵' },
+  { id: 'data', label: '資料' },
+] as const;
+
+type SettingsTab = typeof SETTINGS_TABS[number]['id'];
 
 export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapState | null>(null);
@@ -200,6 +234,7 @@ export default function App() {
     | { kind: 'settings' }
     | null
   >(null);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance');
   const [importProgress, setImportProgress] = useState<{ progress: number; message: string } | null>(null);
   const [leftWidth, setLeftWidth] = useState(() => storedWidth(SIDEBAR_WIDTH_KEY, 270, 210, 420));
   const [listWidth, setListWidth] = useState(() => storedWidth(NOTE_LIST_WIDTH_KEY, 330, 250, 480));
@@ -212,8 +247,25 @@ export default function App() {
   const [noteSortDirection, setNoteSortDirection] = useState<NoteSortDirection>(
     () => parseNoteSortDirection(localStorage.getItem(NOTE_SORT_DIRECTION_KEY)),
   );
+  const [todoSortBy, setTodoSortBy] = useState<NoteSortBy>(
+    () => parseTodoSortBy(localStorage.getItem(TODO_SORT_BY_KEY)),
+  );
+  const [todoSortDirection, setTodoSortDirection] = useState<NoteSortDirection>(
+    () => {
+      const stored = localStorage.getItem(TODO_SORT_DIRECTION_KEY);
+      return stored === 'asc' || stored === 'desc'
+        ? stored
+        : DEFAULT_TODO_SORT_DIRECTION;
+    },
+  );
+  const [todoStatus, setTodoStatus] = useState<TodoStatus>(
+    () => parseTodoStatus(localStorage.getItem(TODO_STATUS_KEY)),
+  );
   const [showNoteSummary, setShowNoteSummary] = useState(
     () => parseShowNoteSummary(localStorage.getItem(NOTE_LIST_SUMMARY_KEY)),
+  );
+  const [showSourceLineNumbers, setShowSourceLineNumbers] = useState(
+    () => parseShowSourceLineNumbers(localStorage.getItem(SOURCE_LINE_NUMBERS_KEY)),
   );
   const [searchScope, setSearchScope] = useState<SearchScope>(
     () => parseSearchScope(localStorage.getItem(SEARCH_SCOPE_KEY)),
@@ -238,6 +290,10 @@ export default function App() {
     y: number;
   } | null>(null);
   const [moveNoteDialog, setMoveNoteDialog] = useState<NoteSummary | null>(null);
+  const [todoDueDialog, setTodoDueDialog] = useState<{
+    note: TodoDueNote;
+    value: string;
+  } | null>(null);
   const [notebookDialog, setNotebookDialog] = useState<NotebookDialogState | null>(null);
   const [newNotebookMenuOpen, setNewNotebookMenuOpen] = useState(false);
   const [notebookPickerSearch, setNotebookPickerSearch] = useState('');
@@ -401,8 +457,24 @@ export default function App() {
   }, [noteSortDirection]);
 
   useEffect(() => {
+    localStorage.setItem(TODO_SORT_BY_KEY, todoSortBy);
+  }, [todoSortBy]);
+
+  useEffect(() => {
+    localStorage.setItem(TODO_SORT_DIRECTION_KEY, todoSortDirection);
+  }, [todoSortDirection]);
+
+  useEffect(() => {
+    localStorage.setItem(TODO_STATUS_KEY, todoStatus);
+  }, [todoStatus]);
+
+  useEffect(() => {
     localStorage.setItem(NOTE_LIST_SUMMARY_KEY, String(showNoteSummary));
   }, [showNoteSummary]);
+
+  useEffect(() => {
+    localStorage.setItem(SOURCE_LINE_NUMBERS_KEY, String(showSourceLineNumbers));
+  }, [showSourceLineNumbers]);
 
   useEffect(() => {
     localStorage.setItem(SEARCH_SCOPE_KEY, searchScope);
@@ -496,6 +568,21 @@ export default function App() {
   const searchNotebookID = view.kind === 'notebook' ? view.id : current.notebookId;
   const effectiveSearchScope = searchNotebookID ? searchScope : 'all';
   const searching = search.trim() !== '';
+  const activeSortBy = view.kind === 'todo' ? todoSortBy : noteSortBy;
+  const activeSortDirection = view.kind === 'todo'
+    ? todoSortDirection
+    : noteSortDirection;
+  const updateActiveSortBy = (value: NoteSortBy) => {
+    if (view.kind === 'todo') setTodoSortBy(value);
+    else setNoteSortBy(value);
+  };
+  const toggleActiveSortDirection = () => {
+    if (view.kind === 'todo') {
+      setTodoSortDirection((value) => value === 'asc' ? 'desc' : 'asc');
+    } else {
+      setNoteSortDirection((value) => value === 'asc' ? 'desc' : 'asc');
+    }
+  };
 
   const listQuery = useCallback(() => {
     return buildNoteListQuery({
@@ -503,12 +590,21 @@ export default function App() {
       search,
       searchScope: effectiveSearchScope,
       searchNotebookID,
-      sortBy: noteSortBy,
-      sortDirection: noteSortDirection,
+      sortBy: activeSortBy,
+      sortDirection: activeSortDirection,
+      todoStatus: view.kind === 'todo' ? todoStatus : undefined,
       limit: 300,
       offset: 0,
     });
-  }, [effectiveSearchScope, noteSortBy, noteSortDirection, search, searchNotebookID, view]);
+  }, [
+    activeSortBy,
+    activeSortDirection,
+    effectiveSearchScope,
+    search,
+    searchNotebookID,
+    todoStatus,
+    view,
+  ]);
 
   const listFilterKey = [
     view.kind,
@@ -516,6 +612,7 @@ export default function App() {
     search,
     searching ? effectiveSearchScope : '',
     searching ? searchNotebookID : '',
+    view.kind === 'todo' ? todoStatus : '',
   ].join(':');
 
   const refreshNotes = useCallback(async () => {
@@ -921,12 +1018,16 @@ export default function App() {
     }
     try {
       await saveCurrent();
-      const note = await api.createNote(activeNotebookId);
+      let note = await api.createNote(activeNotebookId);
+      if (view.kind === 'todo') {
+        await api.setNoteTodo(note.id, true, 0, 0);
+        note = { ...note, isTodo: true, todoDue: 0, todoCompleted: 0 };
+      }
       cacheEditorNote(note);
       mountEditorNote(note.id);
       setCurrent(note);
       setEditorTabs((tabs) => openEditorNote(tabs, { id: note.id, title: note.title }));
-      setView({ kind: 'notebook', id: activeNotebookId });
+      if (view.kind !== 'todo') setView({ kind: 'notebook', id: activeNotebookId });
       await Promise.all([refreshNotes(), refreshTaxonomy()]);
     } catch (error) {
       notify(`無法建立筆記：${errorMessage(error)}`);
@@ -939,6 +1040,7 @@ export default function App() {
     refreshNotes,
     refreshTaxonomy,
     saveCurrent,
+    view.kind,
   ]);
 
   const openCreateNotebookDialog = useCallback((parentID = '') => {
@@ -1384,9 +1486,65 @@ export default function App() {
     }
   }, [exportingFormat, notify, saveCurrent]);
 
+  const updateNoteTodo = useCallback(async (
+    note: Pick<NoteSummary, 'id' | 'isTodo' | 'todoDue' | 'todoCompleted'>,
+    changes: Partial<Pick<NoteSummary, 'isTodo' | 'todoDue' | 'todoCompleted'>>,
+  ): Promise<boolean> => {
+    const next = {
+      isTodo: changes.isTodo ?? note.isTodo,
+      todoDue: changes.todoDue ?? note.todoDue,
+      todoCompleted: changes.todoCompleted ?? note.todoCompleted,
+    };
+    setNotes((items) => items.map((item) => item.id === note.id ? { ...item, ...next } : item));
+    setCurrent((value) => value.id === note.id ? { ...value, ...next } : value);
+    const cached = editorNoteCacheRef.current[note.id];
+    if (cached) cacheEditorNote({ ...cached, ...next });
+    try {
+      await api.setNoteTodo(note.id, next.isTodo, next.todoDue, next.todoCompleted);
+      await refreshNotes();
+      return true;
+    } catch (error) {
+      const previous = {
+        isTodo: note.isTodo,
+        todoDue: note.todoDue,
+        todoCompleted: note.todoCompleted,
+      };
+      setNotes((items) => items.map((item) => item.id === note.id ? { ...item, ...previous } : item));
+      setCurrent((value) => value.id === note.id ? { ...value, ...previous } : value);
+      const previousCached = editorNoteCacheRef.current[note.id];
+      if (previousCached) cacheEditorNote({ ...previousCached, ...previous });
+      notify(`更新待辦狀態失敗：${errorMessage(error)}`);
+      return false;
+    }
+  }, [cacheEditorNote, notify, refreshNotes]);
+
   const toggleTodoState = () => {
-    updateDraft(nextTodoState(current));
+    void updateNoteTodo(current, nextTodoState(current));
   };
+
+  const openTodoDueDialog = useCallback((
+    note: TodoDueNote,
+  ) => {
+    setNoteContextMenu(null);
+    setTodoDueDialog({
+      note,
+      value: todoDueDateValue(note.todoDue),
+    });
+  }, []);
+
+  const saveTodoDue = useCallback(async () => {
+    if (!todoDueDialog) return;
+    const saved = await updateNoteTodo(todoDueDialog.note, {
+      todoDue: todoDueFromDateValue(todoDueDialog.value),
+    });
+    if (saved) setTodoDueDialog(null);
+  }, [todoDueDialog, updateNoteTodo]);
+
+  const clearTodoDue = useCallback(async () => {
+    if (!todoDueDialog) return;
+    const saved = await updateNoteTodo(todoDueDialog.note, { todoDue: 0 });
+    if (saved) setTodoDueDialog(null);
+  }, [todoDueDialog, updateNoteTodo]);
 
   const openAttachment = useCallback(async (resource: Resource) => {
     try {
@@ -1542,11 +1700,18 @@ export default function App() {
   }, [moveNoteDialog, notebookPickerSearch, notebooks]);
   const activeViewTitle = view.kind === 'trash'
     ? '垃圾桶'
+    : view.kind === 'todo'
+      ? '待辦'
     : view.kind === 'tag'
       ? `#${tags.find((tag) => tag.id === view.id)?.title || ''}`
       : view.kind === 'notebook'
         ? activeNotebook?.title || '筆記本'
         : '全部筆記';
+  const noteContextMenuHeight = noteContextMenu
+    ? 42 +
+      (noteContextMenu.note.storageKind === 'directory' ? 72 : 0) +
+      (noteContextMenu.note.isTodo ? 112 : 42)
+    : 0;
 
   const toggleNotebook = (notebookID: string) => {
     setCollapsedNotebookIds((current) => {
@@ -1764,6 +1929,15 @@ export default function App() {
                 >
                   <UiIcon name="all-notes" />
                 </button>
+                <button
+                  className={`icon-button nav-item ${view.kind === 'todo' ? 'active' : ''}`}
+                  type="button"
+                  title="待辦"
+                  aria-label="待辦"
+                  onClick={() => setView({ kind: 'todo' })}
+                >
+                  <UiIcon name="todo" />
+                </button>
                 <span className="sidebar-nav-divider" aria-hidden="true" />
                 <button
                   className={`icon-button nav-item ${view.kind === 'trash' ? 'active' : ''}`}
@@ -1806,6 +1980,14 @@ export default function App() {
               onClick={() => setView({ kind: 'all' })}
             >
               <UiIcon name="all-notes" />
+            </button>
+            <button
+              className={`icon-button rail-action ${view.kind === 'todo' ? 'active' : ''}`}
+              title="待辦"
+              aria-label="待辦"
+              onClick={() => setView({ kind: 'todo' })}
+            >
+              <UiIcon name="todo" />
             </button>
             <button
               className={`icon-button rail-action ${view.kind === 'trash' ? 'active' : ''}`}
@@ -1989,21 +2171,22 @@ export default function App() {
               <div className="note-list-sort">
                 <select
                   className="note-sort-select"
-                  value={noteSortBy}
-                  aria-label="筆記排序方式"
-                  onChange={(event) => setNoteSortBy(parseNoteSortBy(event.target.value))}
+                  value={activeSortBy}
+                  aria-label={view.kind === 'todo' ? '待辦排序方式' : '筆記排序方式'}
+                  onChange={(event) => updateActiveSortBy(parseNoteSortBy(event.target.value))}
                 >
                   <option value="title">字母</option>
                   <option value="created">新增日期</option>
                   <option value="updated">修改日期</option>
+                  {view.kind === 'todo' && <option value="due">到期日</option>}
                 </select>
                 <button
                   className="note-sort-direction"
                   type="button"
-                  aria-label={noteSortDirection === 'asc' ? '目前正序，切換為倒序' : '目前倒序，切換為正序'}
-                  onClick={() => setNoteSortDirection((value) => value === 'asc' ? 'desc' : 'asc')}
+                  aria-label={activeSortDirection === 'asc' ? '目前正序，切換為倒序' : '目前倒序，切換為正序'}
+                  onClick={toggleActiveSortDirection}
                 >
-                  {noteSortDirection === 'asc' ? '正序 ↑' : '倒序 ↓'}
+                  {activeSortDirection === 'asc' ? '正序 ↑' : '倒序 ↓'}
                 </button>
               </div>
               <div className="note-list-actions">
@@ -2043,6 +2226,25 @@ export default function App() {
                 </button>
               </div>
             </header>
+            {view.kind === 'todo' && (
+              <div className="todo-status-filter" role="group" aria-label="待辦狀態">
+                {([
+                  { value: 'open', label: '未完成' },
+                  { value: 'completed', label: '已完成' },
+                  { value: 'all', label: '全部' },
+                ] as const).map((filter) => (
+                  <button
+                    key={filter.value}
+                    className={todoStatus === filter.value ? 'active' : ''}
+                    type="button"
+                    aria-pressed={todoStatus === filter.value}
+                    onClick={() => setTodoStatus(filter.value)}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className={`note-list ${showNoteSummary ? '' : 'is-compact'}`} aria-label="筆記清單">
               {notes.length === 0 && (
                 <div className="empty-list">
@@ -2054,7 +2256,7 @@ export default function App() {
               {notes.map((note) => (
                 <div
                   key={note.id}
-                  className={`note-card ${current.id === note.id ? 'active' : ''} ${draggingNoteID === note.id ? 'is-dragging' : ''}`}
+                  className={`note-card ${current.id === note.id ? 'active' : ''} ${draggingNoteID === note.id ? 'is-dragging' : ''} ${note.isTodo ? 'is-todo' : ''} ${note.todoCompleted ? 'is-completed' : ''}`}
                   draggable
                   onDragStart={(event) => {
                     event.dataTransfer.effectAllowed = 'move';
@@ -2071,8 +2273,24 @@ export default function App() {
                     setNoteContextMenu({ note, x: event.clientX, y: event.clientY });
                   }}
                 >
+                  {note.isTodo && (
+                    <button
+                      className={`icon-button todo-checkbox ${note.todoCompleted ? 'is-completed' : ''}`}
+                      type="button"
+                      aria-label={note.todoCompleted
+                        ? `將 ${note.title || '未命名筆記'} 標記為未完成`
+                        : `將 ${note.title || '未命名筆記'} 標記為完成`}
+                      aria-pressed={note.todoCompleted > 0}
+                      title={note.todoCompleted ? '標記未完成' : '標記完成'}
+                      onClick={() => void updateNoteTodo(note, nextTodoState(note))}
+                    >
+                      <UiIcon
+                        name={note.todoCompleted ? 'todo-checkbox-checked' : 'todo-checkbox'}
+                      />
+                    </button>
+                  )}
                   <button
-                    className="note-card-main"
+                    className={`note-card-main ${note.isTodo ? 'has-todo-checkbox' : ''}`}
                     type="button"
                     onClick={() => void selectNote(note.id)}
                   >
@@ -2083,7 +2301,11 @@ export default function App() {
                     <p>{note.snippet || '空白筆記'}</p>
                     <div className="note-card-meta">
                       <span>{note.notebookTitle}</span>
-                      {note.isTodo && <span className="todo-pill">{note.todoCompleted ? '✓ 完成' : '○ 待辦'}</span>}
+                      {note.isTodo && note.todoDue > 0 && (
+                        <span className={`todo-due-badge ${todoDueClassName(note.todoDue)}`}>
+                          {todoDueLabel(note.todoDue)}
+                        </span>
+                      )}
                       {note.attachmentCount > 0 && <span>⌘ {note.attachmentCount}</span>}
                       {note.tags.slice(0, 2).map((tag) => <span className="mini-tag" key={tag}>#{tag}</span>)}
                     </div>
@@ -2269,6 +2491,7 @@ export default function App() {
                         storageKind={note.storageKind}
                         resources={note.resources}
                         theme={theme}
+                        showSourceLineNumbers={showSourceLineNumbers}
                         onChange={(body) => {
                           if (currentRef.current.id === tab.id) updateDraft({ body });
                         }}
@@ -2338,6 +2561,17 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                )}
+                {current.isTodo && (
+                  <button
+                    className={`editor-footer-due ${todoDueClassName(current.todoDue)}`}
+                    type="button"
+                    title={current.todoDue ? '變更待辦到期日' : '設定待辦到期日'}
+                    onClick={() => openTodoDueDialog(current)}
+                  >
+                    <UiIcon name="calendar" />
+                    <span>{current.todoDue ? todoDueLabel(current.todoDue) : '設定到期日'}</span>
+                  </button>
                 )}
                 <span className="word-count">
                   {current.body.length.toLocaleString('zh-TW')} 字元
@@ -2554,7 +2788,7 @@ export default function App() {
               8,
               Math.min(
                 noteContextMenu.y,
-                window.innerHeight - (noteContextMenu.note.storageKind === 'directory' ? 190 : 100),
+                window.innerHeight - noteContextMenuHeight,
               ),
             ),
           }}
@@ -2582,6 +2816,59 @@ export default function App() {
               <div className="context-menu-separator" />
             </>
           )}
+          {noteContextMenu.note.isTodo ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const note = noteContextMenu.note;
+                  setNoteContextMenu(null);
+                  void updateNoteTodo(note, nextTodoState(note));
+                }}
+              >
+                <UiIcon name="todo-checkbox-checked" />
+                {noteContextMenu.note.todoCompleted ? '標記未完成' : '標記完成'}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => openTodoDueDialog(noteContextMenu.note)}
+              >
+                <UiIcon name="calendar" />
+                {noteContextMenu.note.todoDue ? '變更到期日…' : '設定到期日…'}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const note = noteContextMenu.note;
+                  setNoteContextMenu(null);
+                  void updateNoteTodo(note, cancelTodo());
+                }}
+              >
+                <UiIcon name="close" />
+                取消待辦
+              </button>
+              <div className="context-menu-separator" />
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const note = noteContextMenu.note;
+                  setNoteContextMenu(null);
+                  void updateNoteTodo(note, convertToTodo());
+                }}
+              >
+                <UiIcon name="todo" />
+                轉為待辦
+              </button>
+              <div className="context-menu-separator" />
+            </>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -2593,6 +2880,83 @@ export default function App() {
           >
             <span>↪</span> 移至筆記本…
           </button>
+        </div>
+      )}
+
+      {todoDueDialog && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={() => setTodoDueDialog(null)}
+        >
+          <form
+            className="modal-card todo-due-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="todo-due-dialog-title"
+            onMouseDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                setTodoDueDialog(null);
+              }
+            }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveTodoDue();
+            }}
+          >
+            <header>
+              <div>
+                <span className="eyebrow">待辦到期日</span>
+                <h2 id="todo-due-dialog-title">
+                  {todoDueDialog.note.title || '未命名筆記'}
+                </h2>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="關閉"
+                title="關閉"
+                onClick={() => setTodoDueDialog(null)}
+              >
+                <UiIcon name="close" />
+              </button>
+            </header>
+            <div className="todo-due-content">
+              <label htmlFor="todo-due-date">到期日</label>
+              <div className="todo-due-field">
+                <UiIcon name="calendar" />
+                <input
+                  id="todo-due-date"
+                  type="date"
+                  value={todoDueDialog.value}
+                  autoFocus
+                  onChange={(event) => setTodoDueDialog((dialog) => dialog
+                    ? { ...dialog, value: event.target.value }
+                    : dialog)}
+                />
+              </div>
+              <p>到期日會保留到當天結束；未設定日期時，待辦仍會顯示在清單中。</p>
+            </div>
+            <footer>
+              <button
+                type="button"
+                className="todo-due-clear"
+                disabled={!todoDueDialog.note.todoDue}
+                onClick={() => void clearTodoDue()}
+              >
+                清除到期日
+              </button>
+              <div>
+                <button type="button" onClick={() => setTodoDueDialog(null)}>
+                  取消
+                </button>
+                <button className="primary" type="submit">
+                  儲存
+                </button>
+              </div>
+            </footer>
+          </form>
         </div>
       )}
 
@@ -2831,9 +3195,12 @@ export default function App() {
 
       {modal?.kind === 'settings' && (
         <div className="modal-backdrop" onMouseDown={() => setModal(null)}>
-          <div className="modal-card" onMouseDown={(event) => event.stopPropagation()}>
+          <div
+            className="modal-card settings-modal"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
             <header>
-              <div><span className="eyebrow">PuffJoplin</span><h2>設定與資料</h2></div>
+              <div><span className="eyebrow">PuffJoplin</span><h2>設定</h2></div>
               <button
                 className="icon-button"
                 type="button"
@@ -2843,107 +3210,242 @@ export default function App() {
                 <UiIcon name="close" />
               </button>
             </header>
-            <section className="settings-appearance" aria-labelledby="appearance-heading">
-              <div className="settings-section-heading">
-                <div>
-                  <strong id="appearance-heading">字體外觀</strong>
-                  <span>調整整體介面與筆記預覽的字級和字型。</span>
-                </div>
+            <div
+              className="settings-tabs"
+              role="tablist"
+              aria-label="設定分類"
+              onKeyDown={(event) => {
+                const currentIndex = SETTINGS_TABS.findIndex((tab) => tab.id === settingsTab);
+                let nextIndex = currentIndex;
+                if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
+                else if (event.key === 'ArrowLeft') {
+                  nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+                } else if (event.key === 'Home') nextIndex = 0;
+                else if (event.key === 'End') nextIndex = SETTINGS_TABS.length - 1;
+                else return;
+                event.preventDefault();
+                const nextTab = SETTINGS_TABS[nextIndex];
+                setSettingsTab(nextTab.id);
+                window.requestAnimationFrame(() => {
+                  document.getElementById(`settings-tab-${nextTab.id}`)?.focus();
+                });
+              }}
+            >
+              {SETTINGS_TABS.map((tab) => (
                 <button
+                  id={`settings-tab-${tab.id}`}
+                  className={settingsTab === tab.id ? 'active' : ''}
                   type="button"
-                  onClick={() => {
-                    setBaseFontSize(DEFAULT_BASE_FONT_SIZE);
-                    setFontFamily(DEFAULT_FONT_FAMILY);
-                    setCustomFontSelected(false);
-                  }}
+                  role="tab"
+                  aria-selected={settingsTab === tab.id}
+                  aria-controls={`settings-panel-${tab.id}`}
+                  tabIndex={settingsTab === tab.id ? 0 : -1}
+                  key={tab.id}
+                  onClick={() => setSettingsTab(tab.id)}
                 >
-                  恢復預設
+                  {tab.label}
                 </button>
-              </div>
-              <div className="appearance-controls">
-                <label className="appearance-field">
-                  <span>主要字體大小</span>
-                  <div className="font-size-control">
-                    <input
-                      type="range"
-                      min={12}
-                      max={20}
-                      step={1}
-                      value={baseFontSize}
-                      onChange={(event) => setBaseFontSize(normalizeBaseFontSize(event.target.value))}
-                    />
-                    <input
-                      type="number"
-                      min={12}
-                      max={20}
-                      step={1}
-                      value={baseFontSize}
-                      aria-label="主要字體大小（像素）"
-                      onChange={(event) => setBaseFontSize(normalizeBaseFontSize(event.target.value))}
-                    />
-                    <span>px</span>
+              ))}
+            </div>
+            <div className="settings-content">
+              <section
+                id="settings-panel-appearance"
+                className="settings-appearance"
+                role="tabpanel"
+                aria-labelledby="settings-tab-appearance"
+                tabIndex={0}
+                hidden={settingsTab !== 'appearance'}
+              >
+                <div className="settings-section-heading">
+                  <div>
+                    <strong id="appearance-heading">字體外觀</strong>
+                    <span>調整整體介面、字級與原始碼編輯顯示。</span>
                   </div>
-                </label>
-                <label className="appearance-field">
-                  <span>字型</span>
-                  <select
-                    value={customFontSelected ? '__custom' : fontFamily}
-                    onChange={(event) => {
-                      if (event.target.value === '__custom') {
-                        setCustomFontSelected(true);
-                        return;
-                      }
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBaseFontSize(DEFAULT_BASE_FONT_SIZE);
+                      setFontFamily(DEFAULT_FONT_FAMILY);
                       setCustomFontSelected(false);
-                      setFontFamily(event.target.value);
+                      setShowSourceLineNumbers(true);
                     }}
                   >
-                    {FONT_PRESETS.map((preset) => (
-                      <option key={preset.value} value={preset.value}>{preset.label}</option>
-                    ))}
-                    <option value="__custom">自訂字型…</option>
-                  </select>
-                </label>
-                {customFontSelected && (
-                  <label className="appearance-field custom-font-field">
-                    <span>自訂字型名稱</span>
-                    <input
-                      type="text"
-                      value={fontFamily}
-                      spellCheck={false}
-                      placeholder="例如：Noto Sans TC"
-                      onChange={(event) => setFontFamily(event.target.value)}
-                      onBlur={() => setFontFamily(
-                        sanitizeFontFamily(fontFamily) || DEFAULT_FONT_FAMILY,
-                      )}
-                    />
-                    <small>必須是系統已安裝的字型；找不到時會使用 Segoe UI 系統 fallback。</small>
+                    恢復預設
+                  </button>
+                </div>
+                <div className="appearance-controls">
+                  <label className="appearance-field">
+                    <span>主要字體大小</span>
+                    <div className="font-size-control">
+                      <input
+                        type="range"
+                        min={12}
+                        max={20}
+                        step={1}
+                        value={baseFontSize}
+                        onChange={(event) => setBaseFontSize(normalizeBaseFontSize(event.target.value))}
+                      />
+                      <input
+                        type="number"
+                        min={12}
+                        max={20}
+                        step={1}
+                        value={baseFontSize}
+                        aria-label="主要字體大小（像素）"
+                        onChange={(event) => setBaseFontSize(normalizeBaseFontSize(event.target.value))}
+                      />
+                      <span>px</span>
+                    </div>
                   </label>
-                )}
-              </div>
-              <div className="font-preview" aria-label="字體預覽">
-                <strong className="font-preview-brand">PuffJoplin</strong>
-                <span className="font-preview-subtitle">目前位置</span>
-                <p>主要內文以清晰的 1× 字級呈現，方便長時間閱讀與編輯。</p>
-                <small>筆記說明與次要資訊使用 0.8× 字級。</small>
-              </div>
-            </section>
-            <div className="settings-grid">
-              <button onClick={() => void importProfile()}>
-                <strong>從 Joplin profile 匯入</strong>
-                <span>安全複製既有筆記、標籤與附件，不修改來源。</span>
-              </button>
-              <button onClick={() => void importFile()}>
-                <strong>匯入 JEX / ENEX / Markdown</strong>
-                <span>從封存檔或單一 Markdown 檔案加入筆記。</span>
-              </button>
-              <button onClick={() => void api.openDataFolder()}>
-                <strong>開啟資料資料夾</strong>
-                <span>{bootstrap.dataDir}</span>
-              </button>
-              <button onClick={() => void exportNotebook('md')}>
-                <strong>匯出目前筆記本為 Markdown</strong>
-                <span>保留純文字格式，便於備份或移轉。</span>
-              </button>
+                  <label className="appearance-field">
+                    <span>字型</span>
+                    <select
+                      value={customFontSelected ? '__custom' : fontFamily}
+                      onChange={(event) => {
+                        if (event.target.value === '__custom') {
+                          setCustomFontSelected(true);
+                          return;
+                        }
+                        setCustomFontSelected(false);
+                        setFontFamily(event.target.value);
+                      }}
+                    >
+                      {FONT_PRESETS.map((preset) => (
+                        <option key={preset.value} value={preset.value}>{preset.label}</option>
+                      ))}
+                      <option value="__custom">自訂字型…</option>
+                    </select>
+                  </label>
+                  {customFontSelected && (
+                    <label className="appearance-field custom-font-field">
+                      <span>自訂字型名稱</span>
+                      <input
+                        type="text"
+                        value={fontFamily}
+                        spellCheck={false}
+                        placeholder="例如：Noto Sans TC"
+                        onChange={(event) => setFontFamily(event.target.value)}
+                        onBlur={() => setFontFamily(
+                          sanitizeFontFamily(fontFamily) || DEFAULT_FONT_FAMILY,
+                        )}
+                      />
+                      <small>必須是系統已安裝的字型；找不到時會使用 Segoe UI 系統 fallback。</small>
+                    </label>
+                  )}
+                  <div className="appearance-field source-lines-field">
+                    <span>原始碼行號</span>
+                    <label className="appearance-toggle">
+                      <input
+                        type="checkbox"
+                        checked={showSourceLineNumbers}
+                        onChange={(event) => setShowSourceLineNumbers(event.target.checked)}
+                      />
+                      <span className="appearance-toggle-track" aria-hidden="true" />
+                      <span>在 CodeMirror 原始碼模式顯示行號</span>
+                    </label>
+                  </div>
+                </div>
+                <div className="font-preview" aria-label="字體預覽">
+                  <strong className="font-preview-brand">PuffJoplin</strong>
+                  <span className="font-preview-subtitle">目前位置</span>
+                  <p>主要內文以清晰的 1× 字級呈現，方便長時間閱讀與編輯。</p>
+                  <small>筆記說明與次要資訊使用 0.8× 字級。</small>
+                </div>
+              </section>
+              <section
+                id="settings-panel-shortcuts"
+                className="settings-shortcuts"
+                role="tabpanel"
+                aria-labelledby="settings-tab-shortcuts"
+                tabIndex={0}
+                hidden={settingsTab !== 'shortcuts'}
+              >
+                <div className="settings-section-heading">
+                  <div>
+                    <strong id="shortcuts-heading">鍵盤快捷鍵</strong>
+                    <span>目前版本支援的快捷鍵一覽；此清單為唯讀，不提供自訂。</span>
+                  </div>
+                </div>
+                <div className="settings-shortcut-groups">
+                  {KEYBOARD_SHORTCUT_GROUPS.map((group) => (
+                    <section className="settings-shortcut-group" key={group.id}>
+                      <header>
+                        <h3>{group.title}</h3>
+                        <p>{group.description}</p>
+                      </header>
+                      <div className="settings-shortcut-list">
+                        {group.shortcuts.map((shortcut) => (
+                          <div
+                            className="settings-shortcut-row"
+                            key={`${group.id}-${shortcut.keys.join('-')}-${shortcut.action}`}
+                          >
+                            <span>{shortcut.action}</span>
+                            <span className="settings-shortcut-keys">
+                              {shortcut.keys.map((key, index) => (
+                                <span className="settings-shortcut-key-part" key={`${key}-${index}`}>
+                                  {index > 0 && <span className="settings-shortcut-plus" aria-hidden="true">+</span>}
+                                  <kbd>{key}</kbd>
+                                </span>
+                              ))}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </section>
+              <section
+                id="settings-panel-data"
+                className="settings-data"
+                role="tabpanel"
+                aria-labelledby="settings-tab-data"
+                tabIndex={0}
+                hidden={settingsTab !== 'data'}
+              >
+                <div className="settings-section-heading">
+                  <div>
+                    <strong id="data-heading">資料與儲存</strong>
+                    <span>匯入既有筆記、開啟本機資料位置，或建立 Markdown 備份。</span>
+                  </div>
+                </div>
+                <section className="settings-data-section" aria-labelledby="data-import-heading">
+                  <div className="settings-section-heading">
+                    <div>
+                      <strong id="data-import-heading">匯入筆記</strong>
+                      <span>來源資料不會被修改。</span>
+                    </div>
+                  </div>
+                  <div className="settings-grid">
+                    <button onClick={() => void importProfile()}>
+                      <strong>從 Joplin profile 匯入</strong>
+                      <span>安全複製既有筆記、標籤與附件，不修改來源。</span>
+                    </button>
+                    <button onClick={() => void importFile()}>
+                      <strong>匯入 JEX / ENEX / Markdown</strong>
+                      <span>從封存檔或單一 Markdown 檔案加入筆記。</span>
+                    </button>
+                  </div>
+                </section>
+                <section className="settings-data-section" aria-labelledby="data-storage-heading">
+                  <div className="settings-section-heading">
+                    <div>
+                      <strong id="data-storage-heading">儲存與匯出</strong>
+                      <span>管理本機資料位置與目前筆記本的備份。</span>
+                    </div>
+                  </div>
+                  <div className="settings-grid">
+                    <button onClick={() => void api.openDataFolder()}>
+                      <strong>開啟資料資料夾</strong>
+                      <span>{bootstrap.dataDir}</span>
+                    </button>
+                    <button onClick={() => void exportNotebook('md')}>
+                      <strong>匯出目前筆記本為 Markdown</strong>
+                      <span>保留純文字格式，便於備份或移轉。</span>
+                    </button>
+                  </div>
+                </section>
+              </section>
             </div>
             <footer>
               <span>PuffJoplin v{bootstrap.appVersion} · 離線單機版 · 不使用同步、帳號或雲端服務</span>

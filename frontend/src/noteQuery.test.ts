@@ -46,6 +46,23 @@ describe('note list queries', () => {
     })).toMatchObject({ view: 'trash', notebookId: 'notebook-2' });
   });
 
+  it('keeps todo filtering and todo status while searching', () => {
+    expect(buildNoteListQuery({
+      view: { kind: 'todo' },
+      todoStatus: 'completed',
+      search: 'query',
+      searchScope: 'current',
+      searchNotebookID: 'notebook-2',
+      sortBy: 'due',
+      sortDirection: 'asc',
+    })).toMatchObject({
+      view: 'todo',
+      todoStatus: 'completed',
+      notebookId: 'notebook-2',
+      sortBy: 'due',
+    });
+  });
+
   it('falls back to all notebooks when no current directory exists', () => {
     expect(buildNoteListQuery({
       view: { kind: 'all' },

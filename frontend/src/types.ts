@@ -120,9 +120,10 @@ export interface NoteExportRequest {
 }
 
 export interface NoteQuery {
-  view: 'all' | 'notebook' | 'tag' | 'trash';
+  view: 'all' | 'notebook' | 'tag' | 'todo' | 'trash';
   notebookId?: string;
   tagId?: string;
+  todoStatus?: TodoStatus;
   search?: string;
   sortBy?: NoteSortBy;
   sortDirection?: NoteSortDirection;
@@ -130,9 +131,10 @@ export interface NoteQuery {
   offset?: number;
 }
 
-export type NoteSortBy = 'title' | 'created' | 'updated';
+export type NoteSortBy = 'title' | 'created' | 'updated' | 'due';
 export type NoteSortDirection = 'asc' | 'desc';
 export type SearchScope = 'all' | 'current';
+export type TodoStatus = 'open' | 'completed' | 'all';
 
 export interface NotePage {
   items: NoteSummary[];
@@ -181,6 +183,7 @@ export interface NoteDocxExport {
 
 export type View =
   | { kind: 'all' }
+  | { kind: 'todo' }
   | { kind: 'trash' }
   | { kind: 'notebook'; id: string }
   | { kind: 'tag'; id: string };
