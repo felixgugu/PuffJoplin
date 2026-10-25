@@ -2,7 +2,9 @@ name: Build Windows portable app
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
+    tags:
+      - 'v*'
   pull_request:
   workflow_dispatch:
 
@@ -43,7 +45,9 @@ jobs:
 
       - name: Test and build frontend
         working-directory: frontend
-        run: npm run build
+        run: |
+          npm test -- --run
+          npm run build
 
       - name: Build portable executable
         run: wails build -platform windows/amd64 -tags desktop,production
@@ -53,7 +57,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path portable -Force | Out-Null
           Copy-Item build/bin/PuffJoplin.exe portable/PuffJoplin.exe
-          Compress-Archive -Path portable/PuffJoplin.exe -DestinationPath PuffJoplin-win-x64.zip
+          Copy-Item LICENSE portable/LICENSE
+          Copy-Item NOTICE.md portable/NOTICE.md
+          Copy-Item THIRD_PARTY_NOTICES.md portable/THIRD_PARTY_NOTICES.md
+          .\.github\scripts\collect-licenses.ps1 -OutputDirectory portable/licenses
+          $hash = (Get-FileHash portable/PuffJoplin.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  PuffJoplin.exe" | Set-Content -Path portable/SHA256SUMS.txt -Encoding ascii
+          Compress-Archive -Path portable/* -DestinationPath PuffJoplin-win-x64.zip
 
       - uses: actions/upload-artifact@v4
         with:

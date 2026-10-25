@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible PuffJoplin defect
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove private note content, personal paths, tokens, and other sensitive data before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: PuffJoplin version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Windows and WebView2 versions
+    validations:
+      required: true
+  - type: dropdown
+    id: notebook-mode
+    attributes:
+      label: Notebook mode
+      options:
+        - Database notebook
+        - Managed Markdown directory
+        - Both
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
