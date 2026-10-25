@@ -56,6 +56,7 @@
 | 筆記拖曳 | `.note-card[draggable="true"]` | 將筆記拖到筆記本樹以變更目錄。 |
 | 筆記本放置目標 | `.notebook-row.drop-target` | 拖曳筆記時可接受的筆記本目錄。 |
 | 空清單提示 | `.empty-list` | 沒有筆記或搜尋無結果時顯示。 |
+| **筆記卡片右鍵選單** | `.note-context-menu` | 筆記卡片右鍵操作；實體 Markdown 筆記另有複製檔案路徑與檔案總管定位。 |
 
 ## 筆記編輯區
 
@@ -67,20 +68,34 @@
 | 預覽分頁 | `.editor-tab.is-preview` | 唯一未釘選分頁，開啟其他未釘選筆記時被替換。 |
 | 分頁釘選按鈕 | `.editor-tab-pin` | 釘選或取消釘選分頁。 |
 | 分頁關閉按鈕 | `.editor-tab-close` | 關閉釘選分頁；預覽分頁不顯示。 |
-| **筆記標題列** | `.editor-heading` | 編輯區上方固定單列。包含筆記路徑、名稱、儲存狀態與右側操作。 |
+| **筆記標題列** | `.editor-heading` | 編輯區上方固定單列。包含筆記路徑、名稱、匯出與待辦操作。 |
 | 收合筆記清單按鈕 | `.collapse-note-list-button` | 筆記標題列最前方的雙向控制；完全隱藏或恢復筆記清單。 |
 | 筆記路徑 | `.editor-breadcrumbs` | 「筆記本 / 筆記名稱 (儲存狀態)」的整體。 |
 | 完整筆記路徑 | `.note-path-label` | 顯示從根目錄到目前筆記本的完整路徑，不可直接下拉切換。 |
 | 筆記名稱 | `.title-input` | 可直接編輯的單行筆記標題。 |
-| 儲存狀態 | `.save-state` | 顯示 `(已儲存)`、`(編輯中)`、`(儲存中)` 或 `(儲存失敗)`。 |
-| 筆記操作區 | `.editor-heading-actions` | 筆記標題列右側的操作群組。 |
-| 匯出按鈕 | `.export-action-button` | 開啟 PDF／HTML 匯出選單。 |
-| 匯出選單 | `.editor-export-menu` | 選擇「PDF」或「HTML」。 |
+| 筆記操作區 | `.editor-heading-actions` | 筆記標題列右側的匯出與待辦操作群組。 |
+| 匯出按鈕 | `.export-action-button` | 開啟目前筆記的格式匯出選單。 |
+| 匯出選單 | `.editor-export-menu` | 選擇 PDF、HTML、Markdown、DOCX、Mermaid SVG 或 Mermaid PNG。 |
+| Mermaid SVG | `.editor-export-menu` 的 `Mermaid SVG` | 將目前筆記的所有 Mermaid 圖表匯出為 SVG；筆記沒有 Mermaid fence 時停用。 |
+| Mermaid PNG | `.editor-export-menu` 的 `Mermaid PNG` | 將目前筆記的所有 Mermaid 圖表匯出為 PNG；筆記沒有 Mermaid fence 時停用。 |
 | 待辦按鈕 | `.todo-action-button` | 轉為待辦、標記完成或標記未完成。 |
-| 移至垃圾桶按鈕 | `.trash-action-button` | 將目前筆記移至垃圾桶。 |
 | Vditor 編輯器 | `.editor-main`、`.vditor-editor-host` | 完整的 Vditor 元件。 |
 | 編輯工具列 | `.vditor-toolbar` | 標題、粗體、清單、附件、復原、模式切換等工具。 |
+| 上一頁按鈕 | `.vditor-toolbar` 的 `page-prev` | 將目前筆記內容向上捲動約一個可視頁面；快捷鍵為 `Alt+←`。 |
+| 下一頁按鈕 | `.vditor-toolbar` 的 `page-next` | 將目前筆記內容向下捲動約一個可視頁面；快捷鍵為 `Alt+→`。 |
+| 文字顏色按鈕 | `.vditor-toolbar` 的 `text-color` | 開啟 16 色文字顏色面板。 |
+| 文字顏色面板 | `.editor-text-color-palette` | 16 色色盤與「恢復預設色」操作。 |
+| 顏色色票 | `.text-color-swatch` | 單一常用文字顏色按鈕。 |
+| 分割預覽把手 | `.puff-preview-splitter` | Both 模式左右編輯／預覽的垂直拖曳分隔線。 |
+| Vditor 自訂捲軸 | `.puff-editor-scrollbar` | 編輯區與預覽區的 overlay 垂直捲軸軌道。 |
+| Vditor 捲軸拇指 | `.puff-editor-scrollbar-thumb` | 最短 52px 的自訂捲軸拖曳把手。 |
 | 筆記內容區 | `.vditor-content` | IR、所見即所得或原始碼模式的書寫區域。 |
+| **筆記內搜尋面板** | `.editor-find-panel` | Vditor 右上方的搜尋與取代浮動面板。 |
+| 搜尋列 | `.editor-find-row`、`.editor-find-field` | 搜尋字串、符合數、大小寫、全字匹配與結果導覽。 |
+| 取代列 | `.editor-find-row.replace-row` | 取代文字、取代目前與全部取代。 |
+| 搜尋結果標記 | `::highlight(puffjoplin-find-match)` | 所有符合文字的淡色標記。 |
+| 目前搜尋結果 | `::highlight(puffjoplin-find-active)` | 目前導覽結果的強調色標記。 |
+| **圖稿右鍵選單** | `.editor-media-context-menu` | 本機圖片與 Mermaid 圖表的複製影像／檔案選單。 |
 | **筆記底部列** | `.editor-footer` | 編輯區最下方固定狀態列。 |
 | **標籤膠囊列** | `.note-tags`、`.tag-capsule-bar` | 筆記底部列中顯示目前標籤的單行區域；「Tag 區」統一稱為此名稱。 |
 | 標籤膠囊 | `.tag-capsule` | 顯示單一 `#標籤名稱` 的圓角膠囊。 |
@@ -90,7 +105,11 @@
 | 新標籤輸入 | `.tag-editor-new input` | 標籤管理選單底部的「輸入新的標籤」。 |
 | 附件按鈕 | `.attachment-trigger` | 顯示「附件 N」，用來開啟附件清單。 |
 | 附件選單 | `.attachment-popover` | 向上展開的附件清單；每列可開啟或另存。 |
-| 字數與時間 | `.word-count` | 字元數與筆記更新時間。 |
+| 筆記底部操作區 | `.editor-footer-actions` | 筆記底部列右側的附件、字元、日期、儲存狀態與刪除操作。 |
+| 字元數 | `.word-count` | 顯示目前筆記的字元數。 |
+| 更新日期 | `.editor-footer-date` | 顯示目前筆記的更新日期。 |
+| 儲存狀態 | `.save-state` | 顯示 `已儲存`、`編輯中`、`儲存中` 或 `儲存失敗`。 |
+| 刪除按鈕 | `.editor-footer-trash` | 顯示「刪除」，實際動作是將目前筆記移至垃圾桶。 |
 
 ## 浮層與對話框
 
@@ -116,10 +135,14 @@
 - 「目錄」在筆記編輯區指完整筆記本路徑中的目前目錄；整體稱為「完整筆記路徑」。
 - 「Tag 區」統一對應「標籤膠囊列」，展開後的浮層稱為「標籤管理選單」，不要與左側導覽欄的「標籤雲」混用。
 - 「附件區」統一對應「附件按鈕」與「附件選單」，不包含筆記內嵌圖片。
+- 「筆記卡片右鍵選單」對應筆記清單中的單篇筆記操作，不與「筆記本右鍵選單」混用。
 - 「直接管理筆記本」指以磁碟目錄為資料來源的模式，不是匯入；其筆記檔案與 `images/` 目錄以檔案系統為準，SQLite 只保存索引、標籤、待辦與釘選。
 - 「停止管理」只移除 PuffJoplin 中的目錄索引，不會刪除磁碟檔案；不要稱為「刪除資料夾」。
 - 「上方」優先改說「應用標題列」或「筆記標題列」；「下方」優先改說「筆記底部列」。
 - 「右側」優先改說「筆記編輯區」或「筆記操作區」，避免與視窗控制區混淆。
+- 編輯器內的找字與換字功能統一稱為「筆記內搜尋面板」；全域跨筆記搜尋則稱為「全域搜尋框」。
+- 編輯器內右鍵圖片與 Mermaid 圖表時顯示的選單統一稱為「圖稿右鍵選單」。
+- 工具列開啟的 16 色浮層統一稱為「文字顏色面板」，不要與「佈景」或「標籤」混用。
 - 主要筆記總覽統一稱為「全部筆記」，不再使用「所有筆記」。
 
 ## 主要程式位置
@@ -127,4 +150,17 @@
 - 主介面與區塊組合：`frontend/src/App.tsx`
 - 主介面樣式：`frontend/src/styles.css`
 - Vditor 編輯器：`frontend/src/VditorEditor.tsx`
+- 筆記內搜尋面板：`frontend/src/EditorFindPanel.tsx`
+- 筆記內搜尋與取代核心：`frontend/src/editorSearch.ts`
+- 圖稿右鍵選單：`frontend/src/EditorMediaContextMenu.tsx`
+- 文字顏色面板：`frontend/src/TextColorPalette.tsx`
+- 文字顏色核心：`frontend/src/textColor.ts`
+- Vditor 分割與自訂捲軸：`frontend/src/editorViewportController.ts`
 - 前端 API 介面：`frontend/src/api.ts`
+
+## CSS 維護規則
+
+- `frontend/src/styles.css` 是唯一主樣式入口，分層順序固定為 Base、Fluent、Windows shell、Typography、Icon、Fullscreen。
+- 同一 class 在不同 cascade layer 重複出現是刻意覆蓋；除非同步驗證 computed style，不得跨層搬移、合併或重排。
+- 已移除的舊元件 class 不得重新加入；Vditor 動態產生的 `.vditor*` class 不列入死碼判定。
+- 修改樣式後執行 `npm --prefix frontend test`，`styles.test.ts` 會檢查死碼 class、完全相同規則、空規則與分區順序。

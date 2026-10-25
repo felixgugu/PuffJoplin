@@ -15,13 +15,16 @@
   "dependencies": {
     "@mohtasham/md-to-docx": "^4.0.1",
     "canvg": "^4.0.3",
+    "highlight.js": "^11.11.1",
     "react": "19.1.5",
     "react-dom": "19.1.5",
     "vditor": "4.0.1"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@types/react": "19.1.10",
     "@types/react-dom": "19.1.7",
+    "postcss": "^8.5.31",
     "typescript": "5.9.3",
     "vite": "7.3.7",
     "vitest": "5.0.5"

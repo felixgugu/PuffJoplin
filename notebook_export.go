@@ -74,6 +74,38 @@ func (a *App) PrepareNotebookDocxExport(notebookID string) (NotebookDocxExport, 
 	}, nil
 }
 
+func (a *App) PrepareNoteDocxExport(noteID string) (NoteDocxExport, error) {
+	store, err := a.readyStore()
+	if err != nil {
+		return NoteDocxExport{}, err
+	}
+	note, err := store.GetNote(a.ctx, strings.TrimSpace(noteID))
+	if err != nil {
+		return NoteDocxExport{}, errors.New("筆記不存在")
+	}
+	defaultFilename := safeExportName(note.Title, "PuffJoplin-note") + ".docx"
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "匯出筆記為 DOCX",
+		DefaultFilename: defaultFilename,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Word 文件", Pattern: "*.docx"},
+		},
+	})
+	if err != nil || path == "" {
+		return NoteDocxExport{Path: path}, err
+	}
+	path = ensureFileExtension(path, ".docx")
+	markdown, err := buildNoteDocxMarkdown(a.ctx, store, note)
+	if err != nil {
+		return NoteDocxExport{}, err
+	}
+	return NoteDocxExport{
+		Path:            path,
+		DefaultFilename: defaultFilename,
+		Markdown:        markdown,
+	}, nil
+}
+
 func (a *App) SaveDocxExport(path string, dataBase64 string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -92,6 +124,37 @@ func (a *App) SaveDocxExport(path string, dataBase64 string) error {
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("無法寫入 DOCX: %w", err)
+	}
+	return nil
+}
+
+func exportNoteMarkdown(ctx context.Context, store *Store, noteID string, destination string) error {
+	destination, err := filepath.Abs(strings.TrimSpace(destination))
+	if err != nil {
+		return err
+	}
+	note, err := store.GetNote(ctx, strings.TrimSpace(noteID))
+	if err != nil {
+		return errors.New("筆記不存在")
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return fmt.Errorf("無法建立 Markdown 匯出目錄: %w", err)
+	}
+	writer := &exportedResourceWriter{
+		destinationRoot: filepath.Dir(destination),
+		byResourceID:    make(map[string]string),
+		bySourcePath:    make(map[string]string),
+		usedNames:       make(map[string]map[string]bool),
+	}
+	body, err := rewriteNotebookMarkdownResources(ctx, store, note, destination, writer)
+	if err != nil {
+		return err
+	}
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	if err := os.WriteFile(destination, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("無法寫入 Markdown: %w", err)
 	}
 	return nil
 }
@@ -184,6 +247,19 @@ func buildNotebookDocxMarkdown(ctx context.Context, store *Store, notebookID str
 		output.WriteString(strings.TrimSpace(body))
 		output.WriteString("\n\n---\n\n")
 	}
+	return strings.TrimSpace(output.String()) + "\n", nil
+}
+
+func buildNoteDocxMarkdown(ctx context.Context, store *Store, note Note) (string, error) {
+	body, err := inlineNotebookMarkdownResources(ctx, store, note, note.Body, make(map[string]string))
+	if err != nil {
+		return "", err
+	}
+	var output strings.Builder
+	output.WriteString("# ")
+	output.WriteString(escapeMarkdownInline(note.Title))
+	output.WriteString("\n\n")
+	output.WriteString(strings.TrimSpace(body))
 	return strings.TrimSpace(output.String()) + "\n", nil
 }
 

@@ -1,8 +1,14 @@
 export const EDITOR_TABS_KEY = 'puffjoplin.editorTabs.v1';
 
+export type EditorMode = 'ir' | 'wysiwyg' | 'sv';
+export type EditorPreviewMode = 'editor' | 'both';
+export const DEFAULT_EDITOR_MODE: EditorMode = 'sv';
+
 export interface EditorTab {
   id: string;
   title: string;
+  mode?: EditorMode;
+  previewMode?: EditorPreviewMode;
 }
 
 export interface EditorTabsState {
@@ -17,8 +23,27 @@ export const EMPTY_EDITOR_TABS: EditorTabsState = {
   activeID: '',
 };
 
+export function parseEditorMode(value: unknown): EditorMode | null {
+  return value === 'ir' || value === 'wysiwyg' || value === 'sv' ? value : null;
+}
+
+export function editorModeForTab(tab: EditorTab | null | undefined): EditorMode {
+  return parseEditorMode(tab?.mode) ?? DEFAULT_EDITOR_MODE;
+}
+
+export function parseEditorPreviewMode(value: unknown): EditorPreviewMode | null {
+  return value === 'editor' || value === 'both' ? value : null;
+}
+
 function tabTitle(tab: EditorTab): EditorTab {
-  return { id: tab.id, title: tab.title.trim() || '未命名筆記' };
+  const mode = parseEditorMode(tab.mode);
+  const previewMode = parseEditorPreviewMode(tab.previewMode);
+  return {
+    id: tab.id,
+    title: tab.title.trim() || '未命名筆記',
+    ...(mode ? { mode } : {}),
+    ...(previewMode ? { previewMode } : {}),
+  };
 }
 
 export function normalizeEditorTabs(state: EditorTabsState): EditorTabsState {
@@ -41,12 +66,22 @@ export function normalizeEditorTabs(state: EditorTabsState): EditorTabsState {
 }
 
 export function openEditorNote(state: EditorTabsState, tab: EditorTab): EditorTabsState {
-  const normalizedTab = tabTitle(tab);
   const pinnedIndex = state.pinned.findIndex((item) => item.id === tab.id);
   if (pinnedIndex >= 0) {
+    const normalizedTab = tabTitle({
+      ...tab,
+      mode: tab.mode || state.pinned[pinnedIndex].mode,
+      previewMode: tab.previewMode || state.pinned[pinnedIndex].previewMode,
+    });
     const pinned = state.pinned.map((item, index) => index === pinnedIndex ? normalizedTab : item);
     return normalizeEditorTabs({ ...state, pinned, activeID: tab.id });
   }
+  const normalizedTab = tabTitle({
+    ...tab,
+    mode: tab.mode || (state.preview?.id === tab.id ? state.preview.mode : undefined),
+    previewMode: tab.previewMode ||
+      (state.preview?.id === tab.id ? state.preview.previewMode : undefined),
+  });
   return normalizeEditorTabs({ ...state, preview: normalizedTab, activeID: tab.id });
 }
 
@@ -102,6 +137,40 @@ export function updateEditorTabTitle(state: EditorTabsState, id: string, title: 
   });
   const preview = state.preview?.id === id && state.preview.title !== title
     ? (changed = true, { ...state.preview, title })
+    : state.preview;
+  return changed ? { pinned, preview, activeID: state.activeID } : state;
+}
+
+export function updateEditorTabMode(
+  state: EditorTabsState,
+  id: string,
+  mode: EditorMode,
+): EditorTabsState {
+  let changed = false;
+  const pinned = state.pinned.map((tab) => {
+    if (tab.id !== id || tab.mode === mode) return tab;
+    changed = true;
+    return { ...tab, mode };
+  });
+  const preview = state.preview?.id === id && state.preview.mode !== mode
+    ? (changed = true, { ...state.preview, mode })
+    : state.preview;
+  return changed ? { pinned, preview, activeID: state.activeID } : state;
+}
+
+export function updateEditorTabPreviewMode(
+  state: EditorTabsState,
+  id: string,
+  previewMode: EditorPreviewMode,
+): EditorTabsState {
+  let changed = false;
+  const pinned = state.pinned.map((tab) => {
+    if (tab.id !== id || tab.previewMode === previewMode) return tab;
+    changed = true;
+    return { ...tab, previewMode };
+  });
+  const preview = state.preview?.id === id && state.preview.previewMode !== previewMode
+    ? (changed = true, { ...state.preview, previewMode })
     : state.preview;
   return changed ? { pinned, preview, activeID: state.activeID } : state;
 }

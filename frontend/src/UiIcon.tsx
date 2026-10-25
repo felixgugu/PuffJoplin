@@ -4,6 +4,8 @@ export type UiIconName =
   | 'panel-close'
   | 'panel-open'
   | 'plus'
+  | 'search'
+  | 'chevron-up'
   | 'chevron-right'
   | 'chevron-down'
   | 'expand-all'
@@ -13,6 +15,7 @@ export type UiIconName =
   | 'summary'
   | 'locate'
   | 'pin'
+  | 'copy'
   | 'close'
   | 'sun'
   | 'moon'
@@ -62,6 +65,17 @@ export default function UiIcon({ name, filled = false, className = '' }: UiIconP
     case 'plus':
       content = <path d="M10 4v12M4 10h12" />;
       break;
+    case 'search':
+      content = (
+        <>
+          <circle cx="8.5" cy="8.5" r="4.75" />
+          <path d="m12 12 4.25 4.25" />
+        </>
+      );
+      break;
+    case 'chevron-up':
+      content = <path d="m4.5 12.5 5.5-5.5 5.5 5.5" />;
+      break;
     case 'chevron-right':
       content = <path d="m7.5 4.5 5.5 5.5-5.5 5.5" />;
       break;
@@ -107,6 +121,14 @@ export default function UiIcon({ name, filled = false, className = '' }: UiIconP
           d="M7 2.5h6l-.7 4.5 3 3.25v1.75h-4.1v4.5L10 18l-1.2-1.5V12H4.7v-1.75l3-3.25L7 2.5Z"
           fill={filled ? 'currentColor' : 'none'}
         />
+      );
+      break;
+    case 'copy':
+      content = (
+        <>
+          <rect x="7" y="7" width="9.5" height="10" rx="1.75" />
+          <path d="M13 7V5.5a1.75 1.75 0 0 0-1.75-1.75h-7A1.75 1.75 0 0 0 2.5 5.5v7A1.75 1.75 0 0 0 4.25 14H7" />
+        </>
       );
       break;
     case 'close':

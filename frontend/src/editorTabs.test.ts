@@ -1,17 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_EDITOR_MODE,
   EMPTY_EDITOR_TABS,
+  activateEditorTab,
   closeEditorTab,
+  editorModeForTab,
   loadEditorTabs,
   openEditorNote,
   removeNoteFromEditorTabs,
   toggleEditorTabPin,
+  updateEditorTabMode,
+  updateEditorTabPreviewMode,
   type EditorTabsState,
 } from './editorTabs';
 
 const tab = (id: string, title = id) => ({ id, title });
 
 describe('editor tabs', () => {
+  it('defaults new tabs to source mode without replacing saved modes', () => {
+    expect(DEFAULT_EDITOR_MODE).toBe('sv');
+    expect(editorModeForTab(tab('one'))).toBe('sv');
+    expect(editorModeForTab({ ...tab('one'), mode: 'ir' })).toBe('ir');
+    expect(editorModeForTab({ ...tab('one'), mode: 'wysiwyg' })).toBe('wysiwyg');
+  });
+
   it('uses one preview tab and activates existing pinned tabs', () => {
     let state = openEditorNote(EMPTY_EDITOR_TABS, tab('one'));
     state = openEditorNote(state, tab('two'));
@@ -66,5 +78,29 @@ describe('editor tabs', () => {
     expect(state.pinned).toEqual([tab('one')]);
     expect(state.preview).toBeNull();
     expect(state.activeID).toBe('one');
+  });
+
+  it('keeps each tab last editor mode when switching or reopening it', () => {
+    let state = openEditorNote(EMPTY_EDITOR_TABS, tab('one'));
+    state = updateEditorTabMode(state, 'one', 'sv');
+    expect(state.preview?.mode).toBe('sv');
+
+    state = openEditorNote(state, tab('one'));
+    expect(state.preview?.mode).toBe('sv');
+    state = toggleEditorTabPin(state, 'one');
+    state = openEditorNote(state, tab('two'));
+    state = activateEditorTab(state, 'one');
+    expect(state.pinned[0].mode).toBe('sv');
+  });
+
+  it('keeps each tab preview mode through tab changes', () => {
+    let state = openEditorNote(EMPTY_EDITOR_TABS, tab('one'));
+    state = updateEditorTabPreviewMode(state, 'one', 'both');
+    state = toggleEditorTabPin(state, 'one');
+    state = openEditorNote(state, tab('two'));
+    state = activateEditorTab(state, 'one');
+    expect(state.pinned[0].previewMode).toBe('both');
+    state = updateEditorTabPreviewMode(state, 'one', 'editor');
+    expect(state.pinned[0].previewMode).toBe('editor');
   });
 });

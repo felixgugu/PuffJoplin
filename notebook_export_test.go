@@ -124,3 +124,91 @@ func TestBuildNotebookDocxMarkdownEmbedsResources(t *testing.T) {
 		t.Fatalf("internal resource URL leaked into DOCX markdown: %s", markdown)
 	}
 }
+
+func TestExportNoteMarkdownWritesAdjacentResources(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	notebooks, err := store.ListNotebooks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote(ctx, notebooks[0].ID, "Single note", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := store.AddResourceData(ctx, note.ID, "photo.png", []byte("\x89PNG\r\n\x1a\nimage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment, err := store.AddResourceData(ctx, note.ID, "manual.pdf", []byte("%PDF-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := noteInputFromNote(note)
+	input.Body = "![photo](:/" + image.ID + ")\n\n[manual](:/" + attachment.ID + ")"
+	if _, err := store.UpdateNote(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+
+	destination := filepath.Join(t.TempDir(), "Single note.md")
+	if err := exportNoteMarkdown(ctx, store, note.ID, destination); err != nil {
+		t.Fatal(err)
+	}
+	markdown, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markdown), "images/photo.png") ||
+		!strings.Contains(string(markdown), "resources/manual.pdf") {
+		t.Fatalf("unexpected single-note markdown links: %s", markdown)
+	}
+	if strings.Contains(string(markdown), ":/") {
+		t.Fatalf("internal resource URL leaked into markdown: %s", markdown)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(destination), "images", "photo.png")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(destination), "resources", "manual.pdf")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildNoteDocxMarkdownIncludesTitleAndEmbedsResources(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	notebooks, err := store.ListNotebooks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote(ctx, notebooks[0].ID, "Single DOCX note", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := store.AddResourceData(ctx, note.ID, "diagram.png", []byte("\x89PNG\r\n\x1a\nimage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := noteInputFromNote(note)
+	input.Body = "Body text\n\n![diagram](:/" + image.ID + ")"
+	if _, err := store.UpdateNote(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	note, err = store.GetNote(ctx, note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	markdown, err := buildNoteDocxMarkdown(ctx, store, note)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(markdown, "# Single DOCX note\n\nBody text") {
+		t.Fatalf("single-note DOCX heading missing: %s", markdown)
+	}
+	if !strings.Contains(markdown, "data:image/png;base64,") {
+		t.Fatalf("single-note image was not embedded: %s", markdown)
+	}
+	if strings.Contains(markdown, ":/") {
+		t.Fatalf("internal resource URL leaked into single-note DOCX markdown: %s", markdown)
+	}
+}

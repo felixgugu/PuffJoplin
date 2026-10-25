@@ -13,6 +13,7 @@ import EditorTabBar from './EditorTabBar';
 import {
   activateEditorTab as activateEditorTabState,
   closeEditorTab,
+  editorModeForTab,
   EDITOR_TABS_KEY,
   loadEditorTabs,
   normalizeEditorTabs,
@@ -20,10 +21,18 @@ import {
   removeNoteFromEditorTabs,
   toggleEditorTabPin,
   updateEditorTabTitle,
+  updateEditorTabMode,
+  updateEditorTabPreviewMode,
   type EditorTab,
   type EditorTabsState,
 } from './editorTabs';
 import { onboardingDecision } from './onboarding';
+import { extractMermaidBlocks } from './mermaidBlocks';
+import {
+  bytesToBase64,
+  renderMermaidImage,
+  type MermaidImageFormat,
+} from './mermaidExport';
 import NoteTags from './NoteTags';
 import {
   prepareNotebookDialogSubmission,
@@ -154,6 +163,8 @@ const saveStateLabel = {
 
 const noteDragMime = 'application/x-puffjoplin-note-id';
 
+type NoteExportAction = NoteExportFormat | `mermaid-${MermaidImageFormat}`;
+
 type NotebookDialogState = {
   mode: NotebookDialogMode;
   parentId: string;
@@ -169,6 +180,8 @@ export default function App() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [current, setCurrent] = useState<Note>(emptyNote);
+  const [editorNoteCache, setEditorNoteCache] = useState<Record<string, Note>>({});
+  const [mountedEditorIDs, setMountedEditorIDs] = useState<Set<string>>(() => new Set());
   const [editorTabs, setEditorTabs] = useState<EditorTabsState>(
     () => loadEditorTabs(localStorage.getItem(EDITOR_TABS_KEY)),
   );
@@ -177,7 +190,7 @@ export default function App() {
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved');
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
-  const [exportingFormat, setExportingFormat] = useState<NoteExportFormat | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<NoteExportAction | null>(null);
   const [tagSaving, setTagSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [fatalError, setFatalError] = useState('');
@@ -251,15 +264,18 @@ export default function App() {
   const newNotebookMenuRef = useRef<HTMLDivElement | null>(null);
   const editorTabsRef = useRef(editorTabs);
   const currentRef = useRef(current);
+  const editorNoteCacheRef = useRef(editorNoteCache);
   const initializedRef = useRef(false);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
   const pendingSaveRef = useRef(false);
   const listRequestRef = useRef(0);
   const lastListFilterRef = useRef('');
+  const lastSummaryToggleAtRef = useRef(0);
 
   currentRef.current = current;
   editorTabsRef.current = editorTabs;
+  editorNoteCacheRef.current = editorNoteCache;
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
@@ -439,6 +455,38 @@ export default function App() {
     window.setTimeout(() => setToast((value) => value === message ? '' : value), 2800);
   }, []);
 
+  const cacheEditorNote = useCallback((note: Note) => {
+    if (!note.id) return;
+    if (editorNoteCacheRef.current[note.id] === note) return;
+    const next = { ...editorNoteCacheRef.current, [note.id]: note };
+    editorNoteCacheRef.current = next;
+    setEditorNoteCache(next);
+  }, []);
+
+  const forgetEditorNotes = useCallback((ids: string[]) => {
+    const forgotten = new Set(ids.filter(Boolean));
+    if (forgotten.size === 0) return;
+    const nextCache = Object.fromEntries(
+      Object.entries(editorNoteCacheRef.current).filter(([id]) => !forgotten.has(id)),
+    ) as Record<string, Note>;
+    editorNoteCacheRef.current = nextCache;
+    setEditorNoteCache(nextCache);
+    setMountedEditorIDs((mounted) => {
+      if (![...forgotten].some((id) => mounted.has(id))) return mounted;
+      return new Set([...mounted].filter((id) => !forgotten.has(id)));
+    });
+  }, []);
+
+  const mountEditorNote = useCallback((id: string) => {
+    if (!id) return;
+    setMountedEditorIDs((mounted) => {
+      if (mounted.has(id)) return mounted;
+      const next = new Set(mounted);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
   const refreshTaxonomy = useCallback(async () => {
     const [nextNotebooks, nextTags] = await Promise.all([api.listNotebooks(), api.listTags()]);
     setNotebooks(nextNotebooks);
@@ -506,6 +554,12 @@ export default function App() {
     let saveFailed = false;
     try {
       const updated = await api.updateNote(noteToInput(value));
+      cacheEditorNote({
+        ...value,
+        title: updated.title,
+        updatedAt: updated.updatedAt,
+        tags: updated.tags,
+      });
       setCurrent((existing) => existing.id === updated.id
         ? { ...existing, title: updated.title, updatedAt: updated.updatedAt, tags: updated.tags }
         : existing);
@@ -530,7 +584,7 @@ export default function App() {
       }
     }
     return !saveFailed && !dirtyRef.current;
-  }, [notify, refreshNotes]);
+  }, [cacheEditorNote, notify, refreshNotes]);
 
   const scheduleSave = useCallback(() => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
@@ -541,29 +595,67 @@ export default function App() {
   }, [saveCurrent]);
 
   const selectNote = useCallback(async (id: string, mode: 'open' | 'activate' = 'open') => {
+    if (!id || currentRef.current.id === id) return;
+    if (currentRef.current.id && currentRef.current.id !== id) {
+      cacheEditorNote(currentRef.current);
+    }
     if (currentRef.current.id && currentRef.current.id !== id && dirtyRef.current) {
       const saved = await saveCurrent();
       if (!saved) return;
     }
-    try {
-      const note = await api.getNote(id);
-      setCurrent(note);
-      setEditorTabs((tabs) => mode === 'open'
-        ? openEditorNote(tabs, { id: note.id, title: note.title || '未命名筆記' })
-        : activateEditorTabState(tabs, note.id));
-      setSaveState('saved');
-      setExportMenuOpen(false);
-      setAttachmentMenuOpen(false);
-    } catch (error) {
-      setEditorTabs((tabs) => removeNoteFromEditorTabs(tabs, id));
-      notify(`無法開啟筆記：${errorMessage(error)}`);
+    const tabs = editorTabsRef.current;
+    const tabIsOpen = tabs.activeID === id ||
+      tabs.preview?.id === id ||
+      tabs.pinned.some((tab) => tab.id === id);
+    let note = tabIsOpen ? editorNoteCacheRef.current[id] : undefined;
+    if (!note) {
+      try {
+        note = await api.getNote(id);
+      } catch (error) {
+        setEditorTabs((state) => removeNoteFromEditorTabs(state, id));
+        forgetEditorNotes([id]);
+        notify(`無法開啟筆記：${errorMessage(error)}`);
+        return;
+      }
     }
-  }, [notify, saveCurrent]);
+    cacheEditorNote(note);
+    mountEditorNote(note.id);
+    setCurrent(note);
+    setEditorTabs((state) => mode === 'open'
+      ? openEditorNote(state, { id: note.id, title: note.title || '未命名筆記' })
+      : activateEditorTabState(state, note.id));
+    setSaveState('saved');
+    setExportMenuOpen(false);
+    setAttachmentMenuOpen(false);
+  }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent]);
 
-  const activateEditorTab = useCallback(async (id: string) => {
-    if (currentRef.current.id === id) return;
-    await selectNote(id, 'activate');
-  }, [selectNote]);
+  const activateEditorTab = useCallback(async (id: string, cacheOutgoing = true) => {
+    if (!id || currentRef.current.id === id) return;
+    const outgoing = currentRef.current;
+    if (cacheOutgoing && outgoing.id) cacheEditorNote(outgoing);
+    if (cacheOutgoing && outgoing.id && dirtyRef.current) {
+      const saved = await saveCurrent();
+      if (!saved) return;
+    }
+    let note = editorNoteCacheRef.current[id];
+    if (!note) {
+      try {
+        note = await api.getNote(id);
+      } catch (error) {
+        setEditorTabs((tabs) => removeNoteFromEditorTabs(tabs, id));
+        forgetEditorNotes([id]);
+        notify(`無法開啟筆記：${errorMessage(error)}`);
+        return;
+      }
+    }
+    cacheEditorNote(note);
+    mountEditorNote(id);
+    setCurrent(note);
+    setEditorTabs((tabs) => activateEditorTabState(tabs, id));
+    setSaveState('saved');
+    setExportMenuOpen(false);
+    setAttachmentMenuOpen(false);
+  }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent]);
 
   const toggleOpenTabPin = useCallback((id: string) => {
     setEditorTabs((tabs) => toggleEditorTabPin(tabs, id));
@@ -578,10 +670,11 @@ export default function App() {
     }
     const nextTabs = closeEditorTab(tabs, id);
     setEditorTabs(nextTabs);
+    forgetEditorNotes([id]);
     if (!wasActive) return;
-    if (nextTabs.activeID) await selectNote(nextTabs.activeID, 'activate');
+    if (nextTabs.activeID) await activateEditorTab(nextTabs.activeID, false);
     else setCurrent(emptyNote);
-  }, [saveCurrent, selectNote]);
+  }, [activateEditorTab, forgetEditorNotes, saveCurrent]);
 
   const createWelcomeNote = useCallback(async () => {
     const page = await api.listNotes({ view: 'all', limit: 1, offset: 0 });
@@ -602,10 +695,12 @@ export default function App() {
       '',
       '> 所有資料都保存在程式旁的 `data` 資料夾。',
     ].join('\n'));
+    cacheEditorNote(note);
+    mountEditorNote(note.id);
     setCurrent(note);
     setEditorTabs((tabs) => openEditorNote(tabs, { id: note.id, title: note.title }));
     await Promise.all([refreshTaxonomy(), refreshNotes()]);
-  }, [refreshNotes, refreshTaxonomy]);
+  }, [cacheEditorNote, mountEditorNote, refreshNotes, refreshTaxonomy]);
 
   const restoreEditorTabSession = useCallback(async (): Promise<Note | null> => {
     const saved = editorTabsRef.current;
@@ -615,7 +710,12 @@ export default function App() {
       try {
         const note = await api.getNote(tab.id);
         notesByID.set(note.id, note);
-        pinned.push({ id: note.id, title: note.title || '未命名筆記' });
+        pinned.push({
+          id: note.id,
+          title: note.title || '未命名筆記',
+          mode: tab.mode,
+          previewMode: tab.previewMode,
+        });
       } catch {
         // Stale tabs are removed below.
       }
@@ -625,13 +725,22 @@ export default function App() {
       try {
         const note = await api.getNote(saved.preview.id);
         notesByID.set(note.id, note);
-        preview = { id: note.id, title: note.title || '未命名筆記' };
+        preview = {
+          id: note.id,
+          title: note.title || '未命名筆記',
+          mode: saved.preview.mode,
+          previewMode: saved.preview.previewMode,
+        };
       } catch {
         // Stale preview is removed below.
       }
     }
     const tabs = normalizeEditorTabs({ pinned, preview, activeID: saved.activeID });
     setEditorTabs(tabs);
+    const restoredCache = Object.fromEntries(notesByID) as Record<string, Note>;
+    editorNoteCacheRef.current = restoredCache;
+    setEditorNoteCache(restoredCache);
+    if (tabs.activeID) mountEditorNote(tabs.activeID);
     if (!tabs.activeID) return null;
     if (notesByID.has(tabs.activeID)) return notesByID.get(tabs.activeID) || null;
     try {
@@ -639,7 +748,7 @@ export default function App() {
     } catch {
       return null;
     }
-  }, []);
+  }, [mountEditorNote]);
 
   const initialize = useCallback(async () => {
     try {
@@ -710,19 +819,57 @@ export default function App() {
       onEvent('import.finished', () => setImportProgress(null)),
       onEvent('app.error', (value) => setFatalError(String(value))),
       onEvent('managedDirectory.refreshed', () => {
-        const note = currentRef.current;
-        if (note.storageKind !== 'directory' || !note.id || dirtyRef.current) return;
-        void api.getNote(note.id)
-          .then((updated) => {
-            if (currentRef.current.id !== updated.id || dirtyRef.current) return;
-            setCurrent(updated);
-            setEditorTabs((tabs) => updateEditorTabTitle(tabs, updated.id, updated.title));
+        const tabs = editorTabsRef.current;
+        const openIDs = [...new Set([
+          ...tabs.pinned.map((tab) => tab.id),
+          ...(tabs.preview ? [tabs.preview.id] : []),
+        ])];
+        const directoryIDs = openIDs.filter((id) => {
+          const note = id === currentRef.current.id
+            ? currentRef.current
+            : editorNoteCacheRef.current[id];
+          return note?.storageKind === 'directory';
+        });
+        if (directoryIDs.length === 0) return;
+        void Promise.allSettled(directoryIDs.map((id) => api.getNote(id)))
+          .then(async (results) => {
+            const missing: string[] = [];
+            results.forEach((result, index) => {
+              const id = directoryIDs[index];
+              if (result.status === 'rejected') {
+                missing.push(id);
+                return;
+              }
+              const updated = result.value;
+              const isActive = currentRef.current.id === updated.id;
+              if (isActive && (dirtyRef.current || savingRef.current)) return;
+              cacheEditorNote(updated);
+              setEditorTabs((state) => updateEditorTabTitle(state, updated.id, updated.title));
+              if (isActive && currentRef.current.id === updated.id) setCurrent(updated);
+            });
+            if (missing.length === 0) return;
+            const nextTabs = missing.reduce(
+              (state, id) => removeNoteFromEditorTabs(state, id),
+              editorTabsRef.current,
+            );
+            setEditorTabs(nextTabs);
+            forgetEditorNotes(missing);
+            if (missing.includes(currentRef.current.id)) {
+              if (nextTabs.activeID) await activateEditorTab(nextTabs.activeID, false);
+              else setCurrent(emptyNote);
+            }
           })
           .catch(() => undefined);
       }),
     ];
     return () => cleanups.forEach((cleanup) => cleanup());
-  }, [refreshNotes, refreshTaxonomy]);
+  }, [
+    activateEditorTab,
+    cacheEditorNote,
+    forgetEditorNotes,
+    refreshNotes,
+    refreshTaxonomy,
+  ]);
 
   useEffect(() => {
     const onBeforeUnload = () => {
@@ -775,6 +922,8 @@ export default function App() {
     try {
       await saveCurrent();
       const note = await api.createNote(activeNotebookId);
+      cacheEditorNote(note);
+      mountEditorNote(note.id);
       setCurrent(note);
       setEditorTabs((tabs) => openEditorNote(tabs, { id: note.id, title: note.title }));
       setView({ kind: 'notebook', id: activeNotebookId });
@@ -782,7 +931,15 @@ export default function App() {
     } catch (error) {
       notify(`無法建立筆記：${errorMessage(error)}`);
     }
-  }, [activeNotebookId, notify, refreshNotes, refreshTaxonomy, saveCurrent]);
+  }, [
+    activeNotebookId,
+    cacheEditorNote,
+    mountEditorNote,
+    notify,
+    refreshNotes,
+    refreshTaxonomy,
+    saveCurrent,
+  ]);
 
   const openCreateNotebookDialog = useCallback((parentID = '') => {
     setNewNotebookMenuOpen(false);
@@ -922,6 +1079,25 @@ export default function App() {
     }
   }, [notify]);
 
+  const copyNoteFilePath = useCallback(async (note: NoteSummary) => {
+    setNoteContextMenu(null);
+    try {
+      await api.copyNoteFilePath(note.id);
+      notify('已複製 Markdown 檔案路徑');
+    } catch (error) {
+      notify(`複製檔案路徑失敗：${errorMessage(error)}`);
+    }
+  }, [notify]);
+
+  const revealNoteFile = useCallback(async (note: NoteSummary) => {
+    setNoteContextMenu(null);
+    try {
+      await api.revealNoteFile(note.id);
+    } catch (error) {
+      notify(`無法開啟檔案總管：${errorMessage(error)}`);
+    }
+  }, [notify]);
+
   const trashCurrent = useCallback(async () => {
     const note = currentRef.current;
     if (!note.id) return;
@@ -942,26 +1118,28 @@ export default function App() {
       setSaveState('saved');
       const nextTabs = removeNoteFromEditorTabs(editorTabsRef.current, note.id);
       setEditorTabs(nextTabs);
-      if (nextTabs.activeID) await selectNote(nextTabs.activeID, 'activate');
+      forgetEditorNotes([note.id]);
+      if (nextTabs.activeID) await activateEditorTab(nextTabs.activeID, false);
       else setCurrent(emptyNote);
       await refreshNotes();
       notify('筆記已移至垃圾桶');
     } catch (error) {
       notify(`移至垃圾桶失敗：${errorMessage(error)}`);
     }
-  }, [notify, refreshNotes, selectNote]);
+  }, [activateEditorTab, forgetEditorNotes, notify, refreshNotes]);
 
   const restoreCurrent = useCallback(async () => {
     if (!current.id) return;
     try {
       await api.restoreNote(current.id);
       setCurrent((value) => ({ ...value, deletedAt: 0 }));
+      cacheEditorNote({ ...currentRef.current, deletedAt: 0 });
       await refreshNotes();
       notify('筆記已還原');
     } catch (error) {
       notify(errorMessage(error));
     }
-  }, [current.id, notify, refreshNotes]);
+  }, [cacheEditorNote, current.id, notify, refreshNotes]);
 
   const permanentlyDeleteCurrent = useCallback(async () => {
     if (!current.id) return;
@@ -969,15 +1147,23 @@ export default function App() {
     if (!confirmed) return;
     try {
       await api.deleteNotePermanently(current.id);
+      if (saveTimer.current !== null) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      dirtyRef.current = false;
+      pendingSaveRef.current = false;
+      setSaveState('saved');
       const nextTabs = removeNoteFromEditorTabs(editorTabsRef.current, current.id);
       setEditorTabs(nextTabs);
-      if (nextTabs.activeID) await selectNote(nextTabs.activeID, 'activate');
+      forgetEditorNotes([current.id]);
+      if (nextTabs.activeID) await activateEditorTab(nextTabs.activeID, false);
       else setCurrent(emptyNote);
       await refreshNotes();
     } catch (error) {
       notify(errorMessage(error));
     }
-  }, [current.id, notify, refreshNotes, selectNote]);
+  }, [activateEditorTab, current.id, forgetEditorNotes, notify, refreshNotes]);
 
   const importProfile = useCallback(async () => {
     try {
@@ -1104,6 +1290,8 @@ export default function App() {
   const exportCurrentNote = useCallback(async (format: NoteExportFormat) => {
     setExportMenuOpen(false);
     if (!currentRef.current.id || exportingFormat) return;
+    const noteID = currentRef.current.id;
+    const noteTitle = currentRef.current.title;
     if (dirtyRef.current) {
       const saved = await saveCurrent();
       if (!saved) {
@@ -1111,21 +1299,86 @@ export default function App() {
         return;
       }
     }
-    const html = editorRef.current?.getHTML();
-    if (!html) {
-      notify('編輯器尚未載入完成，請稍後再試');
-      return;
-    }
     setExportingFormat(format);
     try {
+      if (format === 'docx') {
+        const prepared = await api.prepareNoteDocx(noteID);
+        if (!prepared.path) return;
+        const dataBase64 = await convertNotebookMarkdownToDocx(
+          prepared.markdown,
+          noteTitle || '未命名筆記',
+        );
+        await api.saveDocxExport(prepared.path, dataBase64);
+        notify(`已匯出至 ${prepared.path}`);
+        return;
+      }
+      let html: string | undefined;
+      if (format === 'pdf' || format === 'html') {
+        const renderedHTML = editorRef.current?.getHTML();
+        if (!renderedHTML) {
+          notify('編輯器尚未載入完成，請稍後再試');
+          return;
+        }
+        html = renderedHTML;
+      }
       const path = await api.exportNote({
-        noteId: currentRef.current.id,
+        noteId: noteID,
         format,
         html,
       });
       if (path) notify(`已匯出至 ${path}`);
     } catch (error) {
-      notify(`匯出失敗：${errorMessage(error)}`);
+      const message = errorMessage(error);
+      if (format === 'docx') {
+        const stack = error instanceof Error ? error.stack || '' : '';
+        void api.reportFrontendError(
+          `Note DOCX export failed: ${message}`,
+          stack,
+          'note-docx-export',
+        );
+      }
+      notify(`匯出失敗：${message}`);
+    } finally {
+      setExportingFormat(null);
+    }
+  }, [exportingFormat, notify, saveCurrent]);
+
+  const exportCurrentMermaid = useCallback(async (format: MermaidImageFormat) => {
+    setExportMenuOpen(false);
+    if (!currentRef.current.id || exportingFormat) return;
+    const noteID = currentRef.current.id;
+    const blocks = extractMermaidBlocks(currentRef.current.body);
+    if (blocks.length === 0) {
+      notify('目前筆記沒有 Mermaid 圖表');
+      return;
+    }
+    if (dirtyRef.current) {
+      const saved = await saveCurrent();
+      if (!saved) {
+        notify('筆記尚未儲存完成，請稍後再匯出');
+        return;
+      }
+    }
+    setExportingFormat(`mermaid-${format}`);
+    try {
+      const images: string[] = [];
+      for (const block of blocks) {
+        const image = await renderMermaidImage(block.code, format);
+        images.push(bytesToBase64(image.data));
+      }
+      const directory = await api.exportMermaidImages(noteID, format, images);
+      if (directory) {
+        notify(`已將 ${blocks.length} 張 Mermaid ${format.toUpperCase()} 匯出至 ${directory}`);
+      }
+    } catch (error) {
+      const message = errorMessage(error);
+      const stack = error instanceof Error ? error.stack || '' : '';
+      void api.reportFrontendError(
+        `Mermaid ${format} export failed: ${message}`,
+        stack,
+        `mermaid-${format}-export`,
+      );
+      notify(`Mermaid 匯出失敗：${message}`);
     } finally {
       setExportingFormat(null);
     }
@@ -1177,18 +1430,20 @@ export default function App() {
     const noteID = currentRef.current.id;
     if (!noteID || tagSaving) return;
     const previousTags = currentRef.current.tags;
+    cacheEditorNote({ ...currentRef.current, tags: nextTags });
     setCurrent((note) => note.id === noteID ? { ...note, tags: nextTags } : note);
     setTagSaving(true);
     try {
       await api.setNoteTags(noteID, nextTags);
       await Promise.all([refreshTaxonomy(), refreshNotes()]);
     } catch (error) {
+      cacheEditorNote({ ...currentRef.current, tags: previousTags });
       setCurrent((note) => note.id === noteID ? { ...note, tags: previousTags } : note);
       notify(`更新標籤失敗：${errorMessage(error)}`);
     } finally {
       setTagSaving(false);
     }
-  }, [notify, refreshNotes, refreshTaxonomy, tagSaving]);
+  }, [cacheEditorNote, notify, refreshNotes, refreshTaxonomy, tagSaving]);
 
   const moveNoteToNotebook = useCallback(async (note: NoteSummary, notebookID: string) => {
     if (!notebookID || notebookID === note.notebookId) {
@@ -1204,6 +1459,7 @@ export default function App() {
         }
       }
       const moved = await api.moveNote(note.id, notebookID);
+      cacheEditorNote(moved);
       if (currentRef.current.id === moved.id) setCurrent(moved);
       setMoveNoteDialog(null);
       setNoteContextMenu(null);
@@ -1212,7 +1468,7 @@ export default function App() {
     } catch (error) {
       notify(`移動失敗：${errorMessage(error)}`);
     }
-  }, [notify, refreshNotes, saveCurrent]);
+  }, [cacheEditorNote, notify, refreshNotes, saveCurrent]);
 
   const canMoveNoteToNotebook = useCallback((note: NoteSummary, notebook: Notebook) => {
     if (note.storageKind === 'directory') {
@@ -1234,6 +1490,33 @@ export default function App() {
     () => notebookPath(notebooks, current.notebookId),
     [current.notebookId, notebooks],
   );
+  const currentMermaidBlocks = useMemo(
+    () => extractMermaidBlocks(current.body),
+    [current.body],
+  );
+  const openEditorTabs = useMemo(
+    () => editorTabs.preview ? [...editorTabs.pinned, editorTabs.preview] : editorTabs.pinned,
+    [editorTabs],
+  );
+  const openEditorIDsKey = openEditorTabs.map((tab) => tab.id).join('|');
+  useEffect(() => {
+    const openIDs = new Set(openEditorIDsKey ? openEditorIDsKey.split('|') : []);
+    setMountedEditorIDs((mounted) => {
+      const next = new Set([...mounted].filter((id) => openIDs.has(id)));
+      if (current.id && openIDs.has(current.id)) next.add(current.id);
+      if (next.size === mounted.size && [...next].every((id) => mounted.has(id))) {
+        return mounted;
+      }
+      return next;
+    });
+    setEditorNoteCache((cache) => {
+      const next = Object.fromEntries(
+        Object.entries(cache).filter(([id]) => openIDs.has(id)),
+      ) as Record<string, Note>;
+      editorNoteCacheRef.current = next;
+      return Object.keys(next).length === Object.keys(cache).length ? cache : next;
+    });
+  }, [current.id, openEditorIDsKey]);
   const notebookDialogParentPath = useMemo(
     () => notebookDialog?.parentId ? notebookPath(notebooks, notebookDialog.parentId) : '',
     [notebookDialog?.parentId, notebooks],
@@ -1730,7 +2013,12 @@ export default function App() {
                   aria-label={showNoteSummary ? '隱藏筆記摘要' : '顯示筆記摘要'}
                   aria-pressed={showNoteSummary}
                   title={showNoteSummary ? '隱藏筆記摘要' : '顯示筆記摘要'}
-                  onClick={() => setShowNoteSummary((value) => !value)}
+                  onClick={() => {
+                    const now = performance.now();
+                    if (now - lastSummaryToggleAtRef.current < 250) return;
+                    lastSummaryToggleAtRef.current = now;
+                    setShowNoteSummary((value) => !value);
+                  }}
                 >
                   <UiIcon name="summary" />
                 </button>
@@ -1790,17 +2078,15 @@ export default function App() {
                   >
                     <div className="note-card-top">
                       <span className="note-card-title">{note.title || '未命名筆記'}</span>
-                      {showNoteSummary && <time>{formatDate(note.updatedAt)}</time>}
+                      <time>{formatDate(note.updatedAt)}</time>
                     </div>
-                    {showNoteSummary && <p>{note.snippet || '空白筆記'}</p>}
-                    {showNoteSummary && (
-                      <div className="note-card-meta">
-                        <span>{note.notebookTitle}</span>
-                        {note.isTodo && <span className="todo-pill">{note.todoCompleted ? '✓ 完成' : '○ 待辦'}</span>}
-                        {note.attachmentCount > 0 && <span>⌘ {note.attachmentCount}</span>}
-                        {note.tags.slice(0, 2).map((tag) => <span className="mini-tag" key={tag}>#{tag}</span>)}
-                      </div>
-                    )}
+                    <p>{note.snippet || '空白筆記'}</p>
+                    <div className="note-card-meta">
+                      <span>{note.notebookTitle}</span>
+                      {note.isTodo && <span className="todo-pill">{note.todoCompleted ? '✓ 完成' : '○ 待辦'}</span>}
+                      {note.attachmentCount > 0 && <span>⌘ {note.attachmentCount}</span>}
+                      {note.tags.slice(0, 2).map((tag) => <span className="mini-tag" key={tag}>#{tag}</span>)}
+                    </div>
                   </button>
                   <button
                     className={`icon-button pin-note-button ${note.isPinned ? 'active' : ''}`}
@@ -1868,7 +2154,6 @@ export default function App() {
                     onChange={(event) => updateDraft({ title: event.target.value })}
                     onBlur={() => void saveCurrent()}
                   />
-                  <span className={`save-state ${saveState}`}>({saveStateLabel[saveState]})</span>
                 </div>
                 <div className="editor-heading-actions">
                   <div
@@ -1893,7 +2178,6 @@ export default function App() {
                           onClick={() => void exportCurrentNote('pdf')}
                         >
                           <span>PDF</span>
-                          <small>可選文字與書籤</small>
                         </button>
                         <button
                           type="button"
@@ -1901,7 +2185,38 @@ export default function App() {
                           onClick={() => void exportCurrentNote('html')}
                         >
                           <span>HTML</span>
-                          <small>單一自包含檔案</small>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => void exportCurrentNote('markdown')}
+                        >
+                          <span>Markdown</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => void exportCurrentNote('docx')}
+                        >
+                          <span>DOCX</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={currentMermaidBlocks.length === 0}
+                          title={currentMermaidBlocks.length === 0 ? '目前筆記沒有 Mermaid 圖表' : undefined}
+                          onClick={() => void exportCurrentMermaid('svg')}
+                        >
+                          <span>Mermaid SVG</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={currentMermaidBlocks.length === 0}
+                          title={currentMermaidBlocks.length === 0 ? '目前筆記沒有 Mermaid 圖表' : undefined}
+                          onClick={() => void exportCurrentMermaid('png')}
+                        >
+                          <span>Mermaid PNG</span>
                         </button>
                       </div>
                     )}
@@ -1913,31 +2228,62 @@ export default function App() {
                   >
                     {todoActionLabel(current)}
                   </button>
-                  <button
-                    className="editor-action-button trash-action-button"
-                    type="button"
-                    onClick={() => void trashCurrent()}
-                    disabled={current.deletedAt > 0}
-                  >
-                    移至垃圾桶
-                  </button>
                 </div>
               </div>
             </div>
 
             <div className="editor-main">
-              <VditorEditor
-                ref={editorRef}
-                key={current.id}
-                noteID={current.id}
-                value={current.body}
-                uploadToken={bootstrap.uploadToken}
-                storageKind={current.storageKind}
-                resources={current.resources}
-                theme={theme}
-                onChange={(body) => updateDraft({ body })}
-                onBlur={() => void saveCurrent()}
-              />
+              {openEditorTabs
+                .filter((tab) => mountedEditorIDs.has(tab.id))
+                .map((tab) => {
+                  const isActive = tab.id === current.id;
+                  const note = isActive ? current : editorNoteCache[tab.id];
+                  if (!note?.id) {
+                    return (
+                      <div
+                        className={`editor-pane ${isActive ? 'active' : ''}`}
+                        key={tab.id}
+                        aria-hidden={!isActive}
+                      >
+                        <div className="editor-pane-loading">正在載入筆記…</div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div
+                      className={`editor-pane ${isActive ? 'active' : ''}`}
+                      key={tab.id}
+                      aria-hidden={!isActive}
+                      inert={!isActive}
+                    >
+                      <VditorEditor
+                        ref={isActive ? editorRef : undefined}
+                        key={tab.id}
+                        noteID={note.id}
+                        noteTitle={note.title}
+                        initialMode={editorModeForTab(tab)}
+                        initialPreviewMode={tab.previewMode || 'editor'}
+                        active={isActive}
+                        value={note.body}
+                        uploadToken={bootstrap.uploadToken}
+                        storageKind={note.storageKind}
+                        resources={note.resources}
+                        theme={theme}
+                        onChange={(body) => {
+                          if (currentRef.current.id === tab.id) updateDraft({ body });
+                        }}
+                        onBlur={() => {
+                          if (currentRef.current.id === tab.id) void saveCurrent();
+                        }}
+                        onModeChange={(mode) =>
+                          setEditorTabs((tabs) => updateEditorTabMode(tabs, tab.id, mode))}
+                        onPreviewModeChange={(previewMode) =>
+                          setEditorTabs((tabs) =>
+                            updateEditorTabPreviewMode(tabs, tab.id, previewMode))}
+                      />
+                    </div>
+                  );
+                })}
             </div>
 
             <footer className="editor-footer">
@@ -1947,54 +2293,73 @@ export default function App() {
                 disabled={tagSaving}
                 onChange={(nextTags) => void updateTags(nextTags)}
               />
-              {current.resources.length > 0 && (
-                <div
-                  className="attachment-picker"
-                  onPointerDown={(event) => event.stopPropagation()}
-                >
-                  <button
-                    className="attachment-trigger"
-                    type="button"
-                    aria-haspopup="menu"
-                    aria-expanded={attachmentMenuOpen}
-                    onClick={() => setAttachmentMenuOpen((value) => !value)}
+              <div className="editor-footer-actions">
+                {current.resources.length > 0 && (
+                  <div
+                    className="attachment-picker"
+                    onPointerDown={(event) => event.stopPropagation()}
                   >
-                    附件 {current.resources.length}
-                  </button>
-                  {attachmentMenuOpen && (
-                    <div className="attachment-popover" role="menu" aria-label="筆記附件">
-                      <div className="attachment-popover-title">筆記附件</div>
-                      {current.resources.map((resource, index) => {
-                        const filename = resource.filename || resource.title || `附件 ${index + 1}`;
-                        return (
-                          <div className="attachment-item" key={resource.id}>
-                            <button
-                              className="attachment-open"
-                              type="button"
-                              title={`開啟 ${filename}`}
-                              onClick={() => void openAttachment(resource)}
-                            >
-                              <span aria-hidden="true">⌘</span>
-                              <span>{filename}</span>
-                            </button>
-                            <button
-                              className="attachment-save"
-                              type="button"
-                              title={`另存 ${filename}`}
-                              onClick={() => void saveAttachment(resource)}
-                            >
-                              另存
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-              <span className="word-count">
-                {current.body.length.toLocaleString('zh-TW')} 字元 · {formatDate(current.updatedAt)}
-              </span>
+                    <button
+                      className="attachment-trigger"
+                      type="button"
+                      aria-haspopup="menu"
+                      aria-expanded={attachmentMenuOpen}
+                      onClick={() => setAttachmentMenuOpen((value) => !value)}
+                    >
+                      附件 {current.resources.length}
+                    </button>
+                    {attachmentMenuOpen && (
+                      <div className="attachment-popover" role="menu" aria-label="筆記附件">
+                        <div className="attachment-popover-title">筆記附件</div>
+                        {current.resources.map((resource, index) => {
+                          const filename = resource.filename || resource.title || `附件 ${index + 1}`;
+                          return (
+                            <div className="attachment-item" key={resource.id}>
+                              <button
+                                className="attachment-open"
+                                type="button"
+                                title={`開啟 ${filename}`}
+                                onClick={() => void openAttachment(resource)}
+                              >
+                                <span aria-hidden="true">⌘</span>
+                                <span>{filename}</span>
+                              </button>
+                              <button
+                                className="attachment-save"
+                                type="button"
+                                title={`另存 ${filename}`}
+                                onClick={() => void saveAttachment(resource)}
+                              >
+                                另存
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <span className="word-count">
+                  {current.body.length.toLocaleString('zh-TW')} 字元
+                </span>
+                <span className="editor-footer-date">{formatDate(current.updatedAt)}</span>
+                <span
+                  className={`save-state ${saveState}`}
+                  aria-live="polite"
+                >
+                  {saveStateLabel[saveState]}
+                </span>
+                <button
+                  className="editor-footer-trash"
+                  type="button"
+                  title="移至垃圾桶"
+                  aria-label="移至垃圾桶"
+                  onClick={() => void trashCurrent()}
+                  disabled={current.deletedAt > 0}
+                >
+                  刪除
+                </button>
+              </div>
             </footer>
           </>
         ) : (
@@ -2185,11 +2550,38 @@ export default function App() {
           aria-label={`${noteContextMenu.note.title || '未命名筆記'} 操作`}
           style={{
             left: Math.max(8, Math.min(noteContextMenu.x, window.innerWidth - 224)),
-            top: Math.max(8, Math.min(noteContextMenu.y, window.innerHeight - 100)),
+            top: Math.max(
+              8,
+              Math.min(
+                noteContextMenu.y,
+                window.innerHeight - (noteContextMenu.note.storageKind === 'directory' ? 190 : 100),
+              ),
+            ),
           }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="context-menu-title">{noteContextMenu.note.title || '未命名筆記'}</div>
+          {noteContextMenu.note.storageKind === 'directory' && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void copyNoteFilePath(noteContextMenu.note)}
+              >
+                <UiIcon name="copy" />
+                複製檔案路徑
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void revealNoteFile(noteContextMenu.note)}
+              >
+                <UiIcon name="folder-managed" />
+                開啟至檔案總管
+              </button>
+              <div className="context-menu-separator" />
+            </>
+          )}
           <button
             type="button"
             role="menuitem"

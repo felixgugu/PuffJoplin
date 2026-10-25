@@ -111,12 +111,12 @@ export interface NoteInput {
   author: string;
 }
 
-export type NoteExportFormat = 'pdf' | 'html';
+export type NoteExportFormat = 'pdf' | 'html' | 'markdown' | 'docx';
 
 export interface NoteExportRequest {
   noteId: string;
   format: NoteExportFormat;
-  html: string;
+  html?: string;
 }
 
 export interface NoteQuery {
@@ -168,6 +168,12 @@ export interface ManagedDirectoryReport {
 }
 
 export interface NotebookDocxExport {
+  path: string;
+  defaultFilename: string;
+  markdown: string;
+}
+
+export interface NoteDocxExport {
   path: string;
   defaultFilename: string;
   markdown: string;

@@ -27,10 +27,11 @@ import (
 )
 
 const (
-	cfBitmap = 2
-	cfDIB    = 8
-	cfDIBV5  = 17
-	cfHDROP  = 15
+	cfBitmap      = 2
+	cfDIB         = 8
+	cfUnicodeText = 13
+	cfDIBV5       = 17
+	cfHDROP       = 15
 )
 
 var (
@@ -39,8 +40,12 @@ var (
 	gdi32                 = windows.NewLazySystemDLL("gdi32.dll")
 	procOpenClipboard     = user32.NewProc("OpenClipboard")
 	procCloseClipboard    = user32.NewProc("CloseClipboard")
+	procEmptyClipboard    = user32.NewProc("EmptyClipboard")
 	procGetClipboardData  = user32.NewProc("GetClipboardData")
+	procSetClipboardData  = user32.NewProc("SetClipboardData")
 	procRegisterClipboard = user32.NewProc("RegisterClipboardFormatW")
+	procGlobalAlloc       = kernel32.NewProc("GlobalAlloc")
+	procGlobalFree        = kernel32.NewProc("GlobalFree")
 	procGlobalLock        = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock      = kernel32.NewProc("GlobalUnlock")
 	procGlobalSize        = kernel32.NewProc("GlobalSize")
@@ -55,6 +60,7 @@ var (
 const (
 	dibRGBColors = 0
 	biRGB        = 0
+	gmemMoveable = 0x0002
 )
 
 type winBitmap struct {
@@ -373,4 +379,155 @@ func clipboardFilename(extension string) string {
 		extension = "png"
 	}
 	return "clipboard-" + time.Now().Format("20060102-150405") + "." + extension
+}
+
+func writeClipboardImagePNG(data []byte) error {
+	dib, err := imageDataToDIB(data)
+	if err != nil {
+		return err
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := openClipboardWithRetry(); err != nil {
+		return err
+	}
+	defer procCloseClipboard.Call()
+	procEmptyClipboard.Call()
+	if err := setClipboardBytes(uintptr(cfDIB), dib); err != nil {
+		return err
+	}
+	if format := registeredClipboardFormat("PNG"); format != 0 {
+		if err := setClipboardBytes(format, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeClipboardImageFile(path string) error {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	widePath := utf16.Encode([]rune(absolute))
+	var data bytes.Buffer
+	_ = binary.Write(&data, binary.LittleEndian, uint32(20))
+	_ = binary.Write(&data, binary.LittleEndian, int32(0))
+	_ = binary.Write(&data, binary.LittleEndian, int32(0))
+	_ = binary.Write(&data, binary.LittleEndian, int32(0))
+	_ = binary.Write(&data, binary.LittleEndian, int32(1))
+	for _, value := range widePath {
+		_ = binary.Write(&data, binary.LittleEndian, value)
+	}
+	_ = binary.Write(&data, binary.LittleEndian, uint16(0))
+	_ = binary.Write(&data, binary.LittleEndian, uint16(0))
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := openClipboardWithRetry(); err != nil {
+		return err
+	}
+	defer procCloseClipboard.Call()
+	procEmptyClipboard.Call()
+	return setClipboardBytes(uintptr(cfHDROP), data.Bytes())
+}
+
+func writeClipboardText(value string) error {
+	data := clipboardUnicodeTextBytes(value)
+	if len(data) <= 2 {
+		return errors.New("剪貼簿文字不可為空")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := openClipboardWithRetry(); err != nil {
+		return err
+	}
+	defer procCloseClipboard.Call()
+	procEmptyClipboard.Call()
+	return setClipboardBytes(uintptr(cfUnicodeText), data)
+}
+
+func clipboardUnicodeTextBytes(value string) []byte {
+	encoded := utf16.Encode([]rune(value))
+	data := make([]byte, (len(encoded)+1)*2)
+	for index, character := range encoded {
+		binary.LittleEndian.PutUint16(data[index*2:], character)
+	}
+	return data
+}
+
+func openClipboardWithRetry() error {
+	for attempt := 0; attempt < 8; attempt++ {
+		result, _, _ := procOpenClipboard.Call(0)
+		if result != 0 {
+			return nil
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	return errors.New("無法開啟剪貼簿，請稍後再試")
+}
+
+func setClipboardBytes(format uintptr, data []byte) error {
+	if len(data) == 0 {
+		return errors.New("剪貼簿資料不可為空")
+	}
+	handle, _, _ := procGlobalAlloc.Call(gmemMoveable, uintptr(len(data)))
+	if handle == 0 {
+		return errors.New("無法配置剪貼簿記憶體")
+	}
+	pointer, _, _ := procGlobalLock.Call(handle)
+	if pointer == 0 {
+		procGlobalFree.Call(handle)
+		return errors.New("無法鎖定剪貼簿記憶體")
+	}
+	procRtlMoveMemory.Call(pointer, uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)))
+	procGlobalUnlock.Call(handle)
+	result, _, _ := procSetClipboardData.Call(format, handle)
+	if result == 0 {
+		procGlobalFree.Call(handle)
+		return errors.New("無法寫入剪貼簿")
+	}
+	// After a successful SetClipboardData call Windows owns this memory.
+	return nil
+}
+
+func imageDataToDIB(data []byte) ([]byte, error) {
+	source, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("解碼剪貼簿圖片失敗: %w", err)
+	}
+	bounds := source.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	if width <= 0 || height <= 0 || int64(width)*int64(height)*4 > maxUploadFileBytes {
+		return nil, errors.New("剪貼簿圖片尺寸無效")
+	}
+	stride := ((width*3 + 3) / 4) * 4
+	imageSize := stride * height
+	var output bytes.Buffer
+	output.Grow(40 + imageSize)
+	_ = binary.Write(&output, binary.LittleEndian, uint32(40))
+	_ = binary.Write(&output, binary.LittleEndian, int32(width))
+	_ = binary.Write(&output, binary.LittleEndian, int32(height))
+	_ = binary.Write(&output, binary.LittleEndian, uint16(1))
+	_ = binary.Write(&output, binary.LittleEndian, uint16(24))
+	_ = binary.Write(&output, binary.LittleEndian, uint32(biRGB))
+	_ = binary.Write(&output, binary.LittleEndian, uint32(imageSize))
+	_ = binary.Write(&output, binary.LittleEndian, int32(0))
+	_ = binary.Write(&output, binary.LittleEndian, int32(0))
+	_ = binary.Write(&output, binary.LittleEndian, uint32(0))
+	_ = binary.Write(&output, binary.LittleEndian, uint32(0))
+	row := make([]byte, stride)
+	for y := bounds.Max.Y - 1; y >= bounds.Min.Y; y-- {
+		clear(row)
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			value := color.NRGBAModel.Convert(source.At(x, y)).(color.NRGBA)
+			alpha := uint32(value.A)
+			offset := (x - bounds.Min.X) * 3
+			row[offset] = byte((uint32(value.B)*alpha + 255*(255-alpha)) / 255)
+			row[offset+1] = byte((uint32(value.G)*alpha + 255*(255-alpha)) / 255)
+			row[offset+2] = byte((uint32(value.R)*alpha + 255*(255-alpha)) / 255)
+		}
+		output.Write(row)
+	}
+	return output.Bytes(), nil
 }

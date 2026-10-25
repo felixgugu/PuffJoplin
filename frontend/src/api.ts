@@ -3,6 +3,7 @@ import type {
   ImportReport,
   JoplinProfilePreview,
   ManagedDirectoryReport,
+  NoteDocxExport,
   NotebookDocxExport,
   Note,
   NoteExportRequest,
@@ -101,11 +102,23 @@ export const api = {
   exportNotebook: (notebookId: string, format: 'jex' | 'md') => invoke<string>('ExportNotebook', notebookId, format),
   prepareNotebookDocx: (notebookId: string) =>
     invoke<NotebookDocxExport>('PrepareNotebookDocxExport', notebookId),
+  prepareNoteDocx: (noteId: string) =>
+    invoke<NoteDocxExport>('PrepareNoteDocxExport', noteId),
   saveDocxExport: (path: string, dataBase64: string) =>
     invoke<void>('SaveDocxExport', path, dataBase64),
   exportNote: (request: NoteExportRequest) => invoke<string>('ExportNote', request),
+  exportMermaidImages: (noteId: string, format: 'svg' | 'png', images: string[]) =>
+    invoke<string>('ExportMermaidImages', noteId, format, images),
   attachResource: (noteId: string) => invoke<Note>('AttachResource', noteId),
   pasteClipboardImage: (noteId: string) => invoke<Resource>('PasteClipboardImage', noteId),
+  copyClipboardImage: (filename: string, dataBase64: string) =>
+    invoke<void>('CopyClipboardImage', filename, dataBase64),
+  copyClipboardFile: (filename: string, dataBase64: string) =>
+    invoke<void>('CopyClipboardFile', filename, dataBase64),
+  copyResourceFileToClipboard: (resourceId: string) =>
+    invoke<void>('CopyResourceFileToClipboard', resourceId),
+  copyNoteFilePath: (noteId: string) => invoke<void>('CopyNoteFilePath', noteId),
+  revealNoteFile: (noteId: string) => invoke<void>('RevealNoteFile', noteId),
   openResource: (id: string) => invoke<void>('OpenResource', id),
   revealResource: (id: string) => invoke<void>('RevealResource', id),
   saveResourceAs: (id: string) => invoke<string>('SaveResourceAs', id),

@@ -81,6 +81,7 @@ func (a *App) initialize() error {
 	probeName := probe.Name()
 	probe.Close()
 	_ = os.Remove(probeName)
+	_ = cleanupClipboardTempFiles()
 
 	a.openLogger()
 	lock, err := AcquireInstanceLock(a.dataDir)
@@ -584,13 +585,17 @@ func (a *App) ExportNote(request NoteExportRequest) (string, error) {
 	}
 	request.NoteID = strings.TrimSpace(request.NoteID)
 	request.Format = strings.ToLower(strings.TrimSpace(request.Format))
+	if request.Format == "md" {
+		request.Format = "markdown"
+	}
 	if request.NoteID == "" {
 		return "", errors.New("缺少筆記 ID")
 	}
-	if request.Format != "pdf" && request.Format != "html" {
+	if request.Format != "pdf" && request.Format != "html" && request.Format != "markdown" {
 		return "", errors.New("不支援的筆記匯出格式")
 	}
-	if strings.TrimSpace(request.HTML) == "" {
+	if (request.Format == "pdf" || request.Format == "html") &&
+		strings.TrimSpace(request.HTML) == "" {
 		return "", errors.New("筆記內容尚未載入完成")
 	}
 	note, err := store.GetNote(a.ctx, request.NoteID)
@@ -602,11 +607,16 @@ func (a *App) ExportNote(request NoteExportRequest) (string, error) {
 		filename = "PuffJoplin-note"
 	}
 	extension := "." + request.Format
+	displayName := strings.ToUpper(request.Format)
+	if request.Format == "markdown" {
+		extension = ".md"
+		displayName = "Markdown"
+	}
 	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "匯出目前筆記",
 		DefaultFilename: filename + extension,
 		Filters: []runtime.FileFilter{
-			{DisplayName: strings.ToUpper(request.Format), Pattern: "*" + extension},
+			{DisplayName: displayName, Pattern: "*" + extension},
 		},
 	})
 	if err != nil || path == "" {
@@ -614,6 +624,9 @@ func (a *App) ExportNote(request NoteExportRequest) (string, error) {
 	}
 	if !strings.HasSuffix(strings.ToLower(path), extension) {
 		path += extension
+	}
+	if request.Format == "markdown" {
+		return path, exportNoteMarkdown(a.ctx, store, note.ID, path)
 	}
 	document, err := buildNoteExportHTML(a.ctx, store, note, request.HTML)
 	if err != nil {
@@ -724,6 +737,52 @@ func (a *App) RevealResource(id string) error {
 	}
 	path := store.storedResourcePath(resource)
 	return exec.Command("explorer.exe", "/select,", path).Start()
+}
+
+func (a *App) CopyNoteFilePath(noteID string) error {
+	store, err := a.readyStore()
+	if err != nil {
+		return err
+	}
+	note, err := store.GetNote(a.ctx, strings.TrimSpace(noteID))
+	if err != nil {
+		return errors.New("筆記不存在")
+	}
+	path, err := managedMarkdownNotePath(note)
+	if err != nil {
+		return err
+	}
+	return writeClipboardText(path)
+}
+
+func (a *App) RevealNoteFile(noteID string) error {
+	store, err := a.readyStore()
+	if err != nil {
+		return err
+	}
+	note, err := store.GetNote(a.ctx, strings.TrimSpace(noteID))
+	if err != nil {
+		return errors.New("筆記不存在")
+	}
+	path, err := managedMarkdownNotePath(note)
+	if err != nil {
+		return err
+	}
+	return exec.Command("explorer.exe", "/select,", path).Start()
+}
+
+func managedMarkdownNotePath(note Note) (string, error) {
+	if note.StorageKind != storageKindDirectory || strings.TrimSpace(note.ExternalPath) == "" {
+		return "", errors.New("這篇筆記不是實體 Markdown 檔")
+	}
+	if !strings.EqualFold(filepath.Ext(note.ExternalPath), ".md") {
+		return "", errors.New("這篇筆記不是 .md 檔")
+	}
+	info, err := os.Stat(note.ExternalPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", errors.New("找不到這篇筆記的 Markdown 檔")
+	}
+	return filepath.Clean(note.ExternalPath), nil
 }
 
 func (a *App) SaveResourceAs(id string) (string, error) {
