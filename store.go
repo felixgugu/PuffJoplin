@@ -18,7 +18,7 @@ import (
 	sqlite "modernc.org/sqlite"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 var internalResourcePattern = regexp.MustCompile(`:/[A-Za-z0-9]{32}`)
 
@@ -195,6 +195,7 @@ func (s *Store) initialize(ctx context.Context) error {
 			storage_kind TEXT NOT NULL DEFAULT 'database',
 			storage_root TEXT NOT NULL DEFAULT '',
 			storage_path TEXT NOT NULL DEFAULT '',
+			is_excluded INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		)`,
@@ -216,6 +217,7 @@ func (s *Store) initialize(ctx context.Context) error {
 			external_path TEXT NOT NULL DEFAULT '',
 			external_mtime INTEGER NOT NULL DEFAULT 0,
 			external_size INTEGER NOT NULL DEFAULT 0,
+			is_excluded INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
 			deleted_at INTEGER NOT NULL DEFAULT 0,
@@ -299,10 +301,12 @@ func (s *Store) initialize(ctx context.Context) error {
 		{"notebooks", "storage_kind", "TEXT NOT NULL DEFAULT 'database'"},
 		{"notebooks", "storage_root", "TEXT NOT NULL DEFAULT ''"},
 		{"notebooks", "storage_path", "TEXT NOT NULL DEFAULT ''"},
+		{"notebooks", "is_excluded", "INTEGER NOT NULL DEFAULT 0"},
 		{"notes", "storage_kind", "TEXT NOT NULL DEFAULT 'database'"},
 		{"notes", "external_path", "TEXT NOT NULL DEFAULT ''"},
 		{"notes", "external_mtime", "INTEGER NOT NULL DEFAULT 0"},
 		{"notes", "external_size", "INTEGER NOT NULL DEFAULT 0"},
+		{"notes", "is_excluded", "INTEGER NOT NULL DEFAULT 0"},
 		{"resources", "storage_kind", "TEXT NOT NULL DEFAULT 'database'"},
 		{"resources", "external_path", "TEXT NOT NULL DEFAULT ''"},
 	} {
@@ -486,10 +490,14 @@ func (s *Store) Bootstrap(ctx context.Context, dataDir string, joplinProfile str
 		JoplinProfile:   joplinProfile,
 		CanImportJoplin: joplinProfile != "",
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notes WHERE deleted_at = 0`).Scan(&state.NoteCount); err != nil {
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM notes WHERE deleted_at = 0 AND is_excluded = 0`,
+	).Scan(&state.NoteCount); err != nil {
 		return state, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notebooks`).Scan(&state.NotebookCount); err != nil {
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM notebooks WHERE is_excluded = 0`,
+	).Scan(&state.NotebookCount); err != nil {
 		return state, err
 	}
 	if state.NoteCount == 0 {
@@ -502,7 +510,8 @@ func (s *Store) Bootstrap(ctx context.Context, dataDir string, joplinProfile str
 func (s *Store) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, parent_id, title, icon, sort_order, storage_kind, storage_root, storage_path, created_at, updated_at
-		 FROM notebooks ORDER BY parent_id, sort_order, title COLLATE NOCASE`,
+		 FROM notebooks WHERE is_excluded = 0
+		 ORDER BY parent_id, sort_order, title COLLATE NOCASE`,
 	)
 	if err != nil {
 		return nil, err
@@ -819,7 +828,7 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 		sqlDirection = "ASC"
 	}
 
-	where := []string{"1 = 1"}
+	where := []string{"n.is_excluded = 0"}
 	args := make([]any, 0, 8)
 	switch query.View {
 	case "trash":
@@ -951,7 +960,7 @@ func (s *Store) GetNote(ctx context.Context, id string) (Note, error) {
 		`SELECT id, notebook_id, storage_kind, external_path, title, body, is_todo, todo_due,
 		        todo_completed, source_url, author, is_conflict, is_pinned, external_mtime,
 		        external_size, created_at, updated_at, deleted_at
-		 FROM notes WHERE id = ?`,
+		 FROM notes WHERE id = ? AND is_excluded = 0`,
 		id,
 	).Scan(
 		&note.ID, &note.NotebookID, &note.StorageKind, &note.ExternalPath,
@@ -1052,7 +1061,7 @@ func (s *Store) UpdateNote(ctx context.Context, input NoteInput) (Note, error) {
 	var existingMTime, existingSize int64
 	err := s.db.QueryRowContext(ctx,
 		`SELECT notebook_id, storage_kind, external_path, title, body, external_mtime, external_size
-		 FROM notes WHERE id = ?`,
+		 FROM notes WHERE id = ? AND is_excluded = 0`,
 		input.ID,
 	).Scan(
 		&storedNotebookID, &existingStorageKind, &existingExternalPath,
@@ -1137,7 +1146,10 @@ func (s *Store) MoveNote(ctx context.Context, id string, notebookID string) (Not
 }
 
 func (s *Store) SetNotePinned(ctx context.Context, id string, pinned bool) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE notes SET is_pinned = ? WHERE id = ?`, boolInt(pinned), id)
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE notes SET is_pinned = ? WHERE id = ? AND is_excluded = 0`,
+		boolInt(pinned), id,
+	)
 	if err != nil {
 		return err
 	}
@@ -1155,7 +1167,8 @@ func (s *Store) SetNoteTodo(
 	todoCompleted int64,
 ) error {
 	result, err := s.db.ExecContext(ctx,
-		`UPDATE notes SET is_todo = ?, todo_due = ?, todo_completed = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE notes SET is_todo = ?, todo_due = ?, todo_completed = ?, updated_at = ?
+		 WHERE id = ? AND is_excluded = 0`,
 		boolInt(isTodo), todoDue, todoCompleted, nowMillis(), id,
 	)
 	if err != nil {
@@ -1188,13 +1201,25 @@ func (s *Store) TrashNote(ctx context.Context, id string) error {
 
 func (s *Store) RestoreNote(ctx context.Context, id string) error {
 	now := nowMillis()
-	_, err := s.db.ExecContext(ctx, `UPDATE notes SET deleted_at = 0, updated_at = ? WHERE id = ?`, now, id)
-	return err
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE notes SET deleted_at = 0, updated_at = ? WHERE id = ? AND is_excluded = 0`,
+		now, id,
+	)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return errors.New("筆記不存在")
+	}
+	return nil
 }
 
 func (s *Store) DeleteNotePermanently(ctx context.Context, id string) error {
 	note, noteErr := s.GetNote(ctx, id)
-	if noteErr == nil && note.StorageKind == storageKindDirectory {
+	if noteErr != nil {
+		return errors.New("筆記不存在")
+	}
+	if note.StorageKind == storageKindDirectory {
 		return s.recycleManagedNote(ctx, note)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -1250,7 +1275,7 @@ func (s *Store) SearchNotes(ctx context.Context, search string, limit int) ([]No
 		 FROM notes_fts
 		 JOIN notes n ON n.id = notes_fts.note_id
 		 JOIN notebooks f ON f.id = n.notebook_id
-		 WHERE notes_fts MATCH ? AND n.deleted_at = 0
+		 WHERE notes_fts MATCH ? AND n.deleted_at = 0 AND n.is_excluded = 0
 		 ORDER BY n.is_pinned DESC, bm25(notes_fts), n.updated_at DESC
 		 LIMIT ?`,
 		ftsQuery(query), limit,
@@ -1315,7 +1340,7 @@ func (s *Store) ListTags(ctx context.Context) ([]Tag, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT t.id, t.title, COUNT(nt.note_id)
 		 FROM tags t LEFT JOIN note_tags nt ON nt.tag_id = t.id
-		 LEFT JOIN notes n ON n.id = nt.note_id AND n.deleted_at = 0
+		 LEFT JOIN notes n ON n.id = nt.note_id AND n.deleted_at = 0 AND n.is_excluded = 0
 		 GROUP BY t.id, t.title
 		 HAVING COUNT(n.id) > 0
 		 ORDER BY t.title COLLATE NOCASE`,

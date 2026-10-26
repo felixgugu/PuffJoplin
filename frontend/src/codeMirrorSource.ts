@@ -9,14 +9,19 @@ import {
 import { markdown } from '@codemirror/lang-markdown';
 import {
   bracketMatching,
+  foldable,
+  foldEffect,
   foldGutter,
   foldKeymap,
   HighlightStyle,
   indentOnInput,
   syntaxHighlighting,
+  syntaxTree,
+  unfoldAll as unfoldAllCommand,
 } from '@codemirror/language';
-import { Compartment, EditorState } from '@codemirror/state';
+import { Compartment, EditorState, RangeSetBuilder } from '@codemirror/state';
 import {
+  Decoration,
   drawSelection,
   dropCursor,
   EditorView,
@@ -25,8 +30,12 @@ import {
   lineNumbers,
   placeholder,
   rectangularSelection,
+  ViewPlugin,
+  type DecorationSet,
+  type ViewUpdate,
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
+import { formatMarkdownTables } from './markdownTableFormat';
 
 function foldMarkerDOM(open: boolean): HTMLElement {
   const marker = document.createElement('span');
@@ -43,21 +52,136 @@ const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.emphasis, color: 'var(--source-emphasis)', fontStyle: 'italic' },
   { tag: tags.link, color: 'var(--source-link)' },
   { tag: tags.url, color: 'var(--source-link)' },
-  { tag: tags.monospace, color: 'var(--source-code)' },
   { tag: tags.quote, color: 'var(--source-quote)', fontStyle: 'italic' },
   { tag: tags.meta, color: 'var(--source-meta)' },
   { tag: tags.processingInstruction, color: 'var(--source-meta)' },
   { tag: tags.contentSeparator, color: 'var(--source-meta)', fontWeight: '700' },
-  { tag: tags.list, color: 'var(--accent)', fontWeight: '600' },
+  { tag: tags.list, color: 'var(--source-list)', fontWeight: '600' },
   { tag: tags.labelName, color: 'var(--source-string)' },
   { tag: tags.string, color: 'var(--source-string)' },
 ]);
 
+const codeBlockLineDecoration = Decoration.line({
+  attributes: { class: 'puff-source-code-block' },
+});
+
+export function markdownCodeBlockLineStarts(
+  state: EditorState,
+  from = 0,
+  to = state.doc.length,
+): number[] {
+  const starts = new Set<number>();
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') return;
+      let position = node.from;
+      while (position <= node.to) {
+        const line = state.doc.lineAt(position);
+        if (line.to >= from && line.from <= to) starts.add(line.from);
+        if (line.to >= node.to) break;
+        position = line.to + 1;
+      }
+      return false;
+    },
+  });
+  return [...starts].sort((left, right) => left - right);
+}
+
+const inlineCodeDecoration = Decoration.mark({
+  class: 'puff-source-inline-code',
+});
+
+export function markdownInlineCodeRanges(
+  state: EditorState,
+  from = 0,
+  to = state.doc.length,
+): Array<{ from: number; to: number }> {
+  const ranges: Array<{ from: number; to: number }> = [];
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name !== 'InlineCode' || node.to < from || node.from > to) return;
+      ranges.push({ from: node.from, to: node.to });
+      return false;
+    },
+  });
+  return ranges;
+}
+
+const inlineCodeBackgroundPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+
+    constructor(view: EditorView) {
+      this.decorations = this.build(view);
+    }
+
+    update(update: ViewUpdate) {
+      if (
+        update.docChanged ||
+        update.viewportChanged ||
+        syntaxTree(update.startState) !== syntaxTree(update.state)
+      ) {
+        this.decorations = this.build(update.view);
+      }
+    }
+
+    private build(view: EditorView): DecorationSet {
+      const builder = new RangeSetBuilder<Decoration>();
+      for (const range of markdownInlineCodeRanges(
+        view.state,
+        view.viewport.from,
+        view.viewport.to,
+      )) {
+        builder.add(range.from, range.to, inlineCodeDecoration);
+      }
+      return builder.finish();
+    }
+  },
+  {
+    decorations: (plugin) => plugin.decorations,
+  },
+);
+
+const codeBlockBackgroundPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+
+    constructor(view: EditorView) {
+      this.decorations = this.build(view);
+    }
+
+    update(update: ViewUpdate) {
+      if (
+        update.docChanged ||
+        update.viewportChanged ||
+        syntaxTree(update.startState) !== syntaxTree(update.state)
+      ) {
+        this.decorations = this.build(update.view);
+      }
+    }
+
+    private build(view: EditorView): DecorationSet {
+      const builder = new RangeSetBuilder<Decoration>();
+      for (const lineStart of markdownCodeBlockLineStarts(
+        view.state,
+        view.viewport.from,
+        view.viewport.to,
+      )) {
+        builder.add(lineStart, lineStart, codeBlockLineDecoration);
+      }
+      return builder.finish();
+    }
+  },
+  {
+    decorations: (plugin) => plugin.decorations,
+  },
+);
+
 const editorTheme = EditorView.theme({
   '&': {
     height: '100%',
-    backgroundColor: 'transparent',
-    color: 'var(--text)',
+    backgroundColor: 'var(--source-background)',
+    color: 'var(--source-foreground)',
   },
   '&.cm-focused': {
     outline: 'none',
@@ -65,21 +189,35 @@ const editorTheme = EditorView.theme({
   '.cm-scroller': {
     overflow: 'auto',
     fontFamily: 'var(--font-family-code)',
-    fontSize: '1rem',
-    lineHeight: '1.75',
+    fontSize: 'var(--source-font-size)',
+    fontWeight: 'var(--source-font-weight)',
+    lineHeight: 'var(--source-line-height)',
   },
   '.cm-content': {
     minHeight: '100%',
     padding: '24px var(--editor-inline-padding) 90px',
-    caretColor: 'var(--text)',
+    caretColor: 'var(--source-caret)',
   },
   '.cm-line': {
     padding: '0',
   },
+  '.puff-source-code-block': {
+    backgroundColor: 'var(--source-code-block-background)',
+    color: 'var(--source-code)',
+  },
+  '.puff-source-code-block *': {
+    color: 'inherit',
+  },
+  '.puff-source-inline-code': {
+    padding: '1px 3px',
+    borderRadius: '4px',
+    backgroundColor: 'var(--source-inline-code-background)',
+    color: 'var(--source-inline-code)',
+  },
   '.cm-gutters': {
     border: 'none',
     backgroundColor: 'transparent',
-    color: 'var(--faint)',
+    color: 'var(--source-gutter)',
     userSelect: 'none',
   },
   '.cm-lineNumbers .cm-gutterElement': {
@@ -122,7 +260,8 @@ const editorTheme = EditorView.theme({
     backgroundColor: 'transparent',
   },
   '.cm-cursor': {
-    borderLeftColor: 'var(--text)',
+    borderLeftColor: 'var(--source-caret)',
+    borderLeftWidth: 'var(--source-caret-width)',
   },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
     backgroundColor: 'color-mix(in srgb, var(--accent) 28%, transparent)',
@@ -212,6 +351,8 @@ export class CodeMirrorSource {
             unfold: '展開',
           }),
           foldGutter({ markerDOM: foldMarkerDOM }),
+          inlineCodeBackgroundPlugin,
+          codeBlockBackgroundPlugin,
           this.lineNumbersCompartment.of(options.showLineNumbers ? lineNumbers() : []),
           markdown(),
           syntaxHighlighting(markdownHighlightStyle),
@@ -338,14 +479,14 @@ export class CodeMirrorSource {
     this.syncMirror();
   }
 
-  replaceRange(from: number, to: number, text: string) {
+  replaceRange(from: number, to: number, text: string, focus = true) {
     const safeFrom = Math.max(0, Math.min(from, this.view.state.doc.length));
     const safeTo = Math.max(safeFrom, Math.min(to, this.view.state.doc.length));
     this.view.dispatch({
       changes: { from: safeFrom, to: safeTo, insert: text },
       selection: { anchor: safeFrom + text.length },
     });
-    this.view.focus();
+    if (focus) this.view.focus();
   }
 
   replaceRanges(ranges: ReadonlyArray<CodeMirrorSelection>, text: string) {
@@ -404,6 +545,55 @@ export class CodeMirrorSource {
   redo() {
     redo(this.view);
     this.view.focus();
+  }
+
+  foldAll() {
+    if (this.destroyed) return false;
+    const { state } = this.view;
+    const effects = [];
+    const seen = new Set<string>();
+    for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber++) {
+      const line = state.doc.line(lineNumber);
+      const range = foldable(state, line.from, line.to);
+      if (!range) continue;
+      const key = `${range.from}:${range.to}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      effects.push(foldEffect.of(range));
+    }
+    if (effects.length === 0) return false;
+    this.view.dispatch({ effects });
+    this.view.focus();
+    return true;
+  }
+
+  unfoldAll() {
+    if (this.destroyed) return false;
+    const changed = unfoldAllCommand(this.view);
+    this.view.focus();
+    return changed;
+  }
+
+  formatTable() {
+    if (this.destroyed) return false;
+    const selection = this.view.state.selection.main;
+    const result = formatMarkdownTables(
+      this.view.state.doc.toString(),
+      selection.from,
+      selection.to,
+    );
+    if (result.matchedCount === 0) return false;
+    if (result.formattedCount > 0) {
+      this.view.dispatch({
+        changes: result.changes.map((change) => ({
+          from: change.from,
+          to: change.to,
+          insert: change.text,
+        })),
+      });
+    }
+    this.view.focus();
+    return true;
   }
 
   destroy() {

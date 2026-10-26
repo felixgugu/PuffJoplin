@@ -1,4 +1,5 @@
 export type UiIconName =
+  | 'dashboard'
   | 'all-notes'
   | 'todo'
   | 'todo-checkbox'
@@ -37,6 +38,16 @@ interface UiIconProps {
 export default function UiIcon({ name, filled = false, className = '' }: UiIconProps) {
   let content;
   switch (name) {
+    case 'dashboard':
+      content = (
+        <>
+          <rect x="2.75" y="2.75" width="6" height="6" rx="1.4" />
+          <rect x="11.25" y="2.75" width="6" height="4" rx="1.4" />
+          <rect x="2.75" y="11.25" width="6" height="6" rx="1.4" />
+          <rect x="11.25" y="9.25" width="6" height="8" rx="1.4" />
+        </>
+      );
+      break;
     case 'all-notes':
       content = (
         <>

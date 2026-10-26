@@ -83,6 +83,8 @@ func (a *App) ServeUpload(w http.ResponseWriter, r *http.Request) bool {
 			SuccMap:  make(map[string]string, len(files)),
 		},
 	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
 	for _, header := range files {
 		file, err := header.Open()
 		if err != nil {

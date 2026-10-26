@@ -22,12 +22,15 @@ import EditorMediaContextMenu, {
 import SourceLinePreview from './SourceLinePreview';
 import {
   findSourceLinePreview,
+  findSourcePreviewItems,
+  sourcePreviewDeletion,
   type SourcePreviewLine,
   type SourcePreviewTarget,
 } from './sourceLineTarget';
 import TextColorPalette from './TextColorPalette';
 import { toolbarIcon, type ToolbarIconName } from './toolbarIcons';
 import { EditorViewportController } from './editorViewportController';
+import { useConfirmDialog } from './useConfirmDialog';
 import {
   applySearchHighlights,
   clearSearchHighlights,
@@ -115,7 +118,7 @@ function editorModeButton(editor: Vditor, name: string): HTMLButtonElement | nul
   return item.querySelector<HTMLButtonElement>('button');
 }
 
-function syncEditorModeButtons(editor: Vditor) {
+export function syncEditorModeButtons(editor: Vditor) {
   const mode = editor.getCurrentMode();
   for (const [name, buttonMode] of directEditorModes) {
     const button = editorModeButton(editor, name);
@@ -123,6 +126,13 @@ function syncEditorModeButtons(editor: Vditor) {
     const active = mode === buttonMode;
     button.classList.toggle('vditor-menu--current', active);
     button.setAttribute('aria-pressed', String(active));
+  }
+  const sourceMode = mode === 'sv';
+  for (const name of ['fold-all', 'unfold-all', 'format-table']) {
+    const button = editorModeButton(editor, name);
+    if (!button) continue;
+    button.disabled = !sourceMode;
+    button.setAttribute('aria-disabled', String(!sourceMode));
   }
 }
 
@@ -245,8 +255,12 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const [mediaBusy, setMediaBusy] = useState(false);
   const [sourceLinePreview, setSourceLinePreview] = useState<{
     target: SourcePreviewTarget;
-    anchor: SourcePreviewLine['anchor'];
+    anchor?: SourcePreviewLine['anchor'];
   } | null>(null);
+  const {
+    confirm: confirmSourcePreviewDelete,
+    dialog: sourcePreviewDeleteDialog,
+  } = useConfirmDialog();
   const [textColorPalette, setTextColorPalette] = useState<{ x: number; y: number } | null>(null);
   const [textColor, setTextColor] = useState(TEXT_COLORS[10].value);
   const findQueryInputRef = useRef<HTMLInputElement | null>(null);
@@ -268,6 +282,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const sourceEditorRef = useRef<CodeMirrorSource | null>(null);
   const initializeSourceEditorRef = useRef<() => void>(() => undefined);
   const refreshSourceEditorRef = useRef<() => void>(() => undefined);
+  const openSourceGalleryRef = useRef<() => void>(() => undefined);
 
   themeRef.current = theme;
   showSourceLineNumbersRef.current = showSourceLineNumbers;
@@ -284,6 +299,18 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     setSourceLinePreview(null);
   }, []);
 
+  const openSourceGallery = useCallback(() => {
+    const markdown = sourceEditorRef.current?.getValue() ??
+      toEditorMarkdown(valueRef.current, resourcesRef.current);
+    const items = findSourcePreviewItems(markdown);
+    if (items.length === 0) {
+      editorRef.current?.tip('此筆記沒有可顯示的圖片或 Mermaid', 3200);
+      return;
+    }
+    setSourceLinePreview({ target: items[0] });
+  }, []);
+  openSourceGalleryRef.current = openSourceGallery;
+
   const handleSourceLineActivate = useCallback((line: CodeMirrorLineActivation | null) => {
     if (!line) return;
     const markdown = sourceEditorRef.current?.getValue();
@@ -292,6 +319,51 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     if (!target) return;
     setSourceLinePreview({ target, anchor: line.anchor });
   }, []);
+
+  const selectSourcePreview = useCallback((target: SourcePreviewTarget) => {
+    setSourceLinePreview((current) => current ? { ...current, target } : current);
+  }, []);
+
+  const locateSourcePreview = useCallback((target: SourcePreviewTarget) => {
+    const editor = editorRef.current;
+    if (editor && editor.getCurrentMode() !== 'sv') {
+      activateEditorMode(editor, 'sv');
+      window.setTimeout(() => {
+        sourceEditorRef.current?.selectRange(target.from, target.to, true);
+      }, 80);
+      return;
+    }
+    sourceEditorRef.current?.selectRange(target.from, target.to, true);
+  }, []);
+
+  const deleteSourcePreview = useCallback(async (
+    target: SourcePreviewTarget,
+  ): Promise<boolean> => {
+    const label = target.kind === 'mermaid' ? 'Mermaid 圖表' : target.alt;
+    const confirmed = await confirmSourcePreviewDelete({
+      title: '從內文刪除',
+      message: `要從這篇筆記移除「${label}」嗎？附件檔會保留，之後可由資源檔清理回收。`,
+      confirmLabel: '從內文刪除',
+      tone: 'danger',
+    });
+    if (!confirmed) return false;
+    const editor = sourceEditorRef.current;
+    if (!editor) return false;
+    const markdown = editor.getValue();
+    const items = findSourcePreviewItems(markdown);
+    const index = Math.max(0, items.findIndex((item) => item.id === target.id));
+    const deletion = sourcePreviewDeletion(markdown, target);
+    editor.replaceRange(deletion.from, deletion.to, '', false);
+    const remaining = findSourcePreviewItems(editor.getValue());
+    if (remaining.length === 0) {
+      setSourceLinePreview(null);
+    } else {
+      setSourceLinePreview((current) => current
+        ? { ...current, target: remaining[Math.min(index, remaining.length - 1)] }
+        : current);
+    }
+    return true;
+  }, [confirmSourcePreviewDelete]);
 
   const setFindActiveMatch = useCallback((index: number) => {
     findActiveIndexRef.current = index;
@@ -948,6 +1020,23 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         '|',
         toolbarIconItem('upload'),
         toolbarIconItem('table'),
+        {
+          ...toolbarIconItem('format-table'),
+          tip: '格式化表格（選取可批次）',
+          tipPosition: 'n',
+          click: () => {
+            if (editor.getCurrentMode() !== 'sv') return;
+            if (!sourceEditorRef.current?.formatTable()) {
+              editorRef.current?.tip('請將游標放在 Markdown 表格內，或選取包含表格的內容', 3200);
+            }
+          },
+        },
+        {
+          ...toolbarIconItem('gallery'),
+          tip: '開啟相簿',
+          tipPosition: 'n',
+          click: () => openSourceGalleryRef.current(),
+        },
         '|',
         toolbarIconItem('undo'),
         toolbarIconItem('redo'),
@@ -970,6 +1059,23 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           tip: '搜尋與取代 (Ctrl+F / Ctrl+H)',
           tipPosition: 'n',
           click: () => openFindRef.current('query'),
+        },
+        '|',
+        {
+          ...toolbarIconItem('fold-all'),
+          tip: '全部收合 (Ctrl+Alt+[)',
+          tipPosition: 'n',
+          click: () => {
+            if (editor.getCurrentMode() === 'sv') sourceEditorRef.current?.foldAll();
+          },
+        },
+        {
+          ...toolbarIconItem('unfold-all'),
+          tip: '全部展開 (Ctrl+Alt+])',
+          tipPosition: 'n',
+          click: () => {
+            if (editor.getCurrentMode() === 'sv') sourceEditorRef.current?.unfoldAll();
+          },
         },
         '|',
         {
@@ -1511,6 +1617,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     if (!sourceLinePreview) return undefined;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (document.querySelector('.confirm-dialog')) return;
       event.preventDefault();
       closeSourceLinePreview();
     };
@@ -1540,16 +1647,37 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     return () => window.cancelAnimationFrame(frame);
   }, [resources, value]);
 
+  const sourcePreviewMarkdown = sourceLinePreview
+    ? sourceEditorRef.current?.getValue() ??
+      toEditorMarkdown(valueRef.current, resourcesRef.current)
+    : '';
+  const sourcePreviewItems = sourceLinePreview
+    ? findSourcePreviewItems(sourcePreviewMarkdown)
+    : [];
+  const activeSourcePreview = sourceLinePreview
+    ? sourcePreviewItems.find((item) => item.id === sourceLinePreview.target.id) ??
+      sourcePreviewItems.find((item) =>
+        item.kind === sourceLinePreview.target.kind &&
+        item.lineNumber === sourceLinePreview.target.lineNumber) ??
+      sourcePreviewItems[0] ??
+      null
+    : null;
+
   return (
     <div ref={shellRef} className="vditor-editor-shell">
       <div ref={hostRef} className="vditor-editor-host" aria-label="Markdown 編輯器" />
-      {active && sourceLinePreview && (
+      {active && activeSourcePreview && sourceLinePreview && (
         <SourceLinePreview
-          target={sourceLinePreview.target}
+          target={activeSourcePreview}
+          items={sourcePreviewItems}
           anchor={sourceLinePreview.anchor}
+          onSelect={selectSourcePreview}
           onClose={closeSourceLinePreview}
+          onLocate={locateSourcePreview}
+          onDeleteRequest={deleteSourcePreview}
         />
       )}
+      {sourcePreviewDeleteDialog}
       {findOpen && (
         <EditorFindPanel
           query={findQuery}

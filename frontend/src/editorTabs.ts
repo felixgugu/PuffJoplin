@@ -27,8 +27,11 @@ export function parseEditorMode(value: unknown): EditorMode | null {
   return value === 'ir' || value === 'wysiwyg' || value === 'sv' ? value : null;
 }
 
-export function editorModeForTab(tab: EditorTab | null | undefined): EditorMode {
-  return parseEditorMode(tab?.mode) ?? DEFAULT_EDITOR_MODE;
+export function editorModeForTab(
+  tab: EditorTab | null | undefined,
+  fallbackMode: EditorMode = DEFAULT_EDITOR_MODE,
+): EditorMode {
+  return parseEditorMode(tab?.mode) ?? parseEditorMode(fallbackMode) ?? DEFAULT_EDITOR_MODE;
 }
 
 export function parseEditorPreviewMode(value: unknown): EditorPreviewMode | null {

@@ -317,7 +317,12 @@ export default function PdfCoverDesigner({
       </p>
 
       <div className="pdf-cover-designer-layout">
-        <div className="pdf-cover-canvas-shell">
+        <div
+          className="pdf-cover-canvas-shell"
+          role="region"
+          aria-label="PDF 封面預覽捲動區"
+          tabIndex={0}
+        >
           <div
             ref={canvasRef}
             className="pdf-cover-canvas"

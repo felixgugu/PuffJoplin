@@ -76,7 +76,10 @@ func normalizeManagedRoot(path string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
-func scanManagedDirectory(root string) (managedDirectoryScan, error) {
+func scanManagedDirectory(
+	root string,
+	exclusions ManagedDirectoryExclusions,
+) (managedDirectoryScan, error) {
 	scan := managedDirectoryScan{
 		Directories: make([]managedDirectoryEntry, 0),
 		Notes:       make([]managedMarkdownEntry, 0),
@@ -109,6 +112,9 @@ func scanManagedDirectory(root string) (managedDirectoryScan, error) {
 			relativePath = filepath.ToSlash(relativePath)
 		}
 		if entry.IsDir() {
+			if managedPathExcluded(root, path, true, exclusions) {
+				return filepath.SkipDir
+			}
 			if relativePath != "" && strings.EqualFold(filepath.Base(path), managedImagesDir) {
 				return filepath.SkipDir
 			}
@@ -131,6 +137,9 @@ func scanManagedDirectory(root string) (managedDirectoryScan, error) {
 			return nil
 		}
 		if !entry.Type().IsRegular() || !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
+			return nil
+		}
+		if managedPathExcluded(root, path, false, exclusions) {
 			return nil
 		}
 		info, err := entry.Info()
@@ -281,7 +290,15 @@ func (s *Store) ListManagedRoots(ctx context.Context) ([]Notebook, error) {
 }
 
 func (s *Store) reindexManagedDirectory(ctx context.Context, rootID string, rootPath string) (ManagedDirectoryReport, error) {
-	scan, err := scanManagedDirectory(rootPath)
+	exclusions, err := s.loadManagedDirectoryExclusions(ctx)
+	if err != nil {
+		return ManagedDirectoryReport{
+			NotebookID: rootID,
+			RootPath:   rootPath,
+			Warnings:   []ImportWarning{{Item: rootPath, Message: err.Error()}},
+		}, err
+	}
+	scan, err := scanManagedDirectory(rootPath, exclusions)
 	if err != nil {
 		return ManagedDirectoryReport{
 			NotebookID: rootID,
@@ -312,21 +329,22 @@ func (s *Store) reindexManagedDirectory(ctx context.Context, rootID string, root
 			}
 			parentID = dirIDs[parentPath]
 		}
-		id := existingNotebooks[strings.ToLower(directory.RelativePath)]
+		id := existingNotebooks[strings.ToLower(directory.RelativePath)].ID
 		if id == "" {
 			id = newID()
 		}
 		dirIDs[directory.RelativePath] = id
 		seenNotebookPaths[strings.ToLower(directory.RelativePath)] = true
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO notebooks(id, parent_id, title, icon, sort_order, storage_kind, storage_root, storage_path, created_at, updated_at)
-			 VALUES(?, ?, ?, '', 0, ?, ?, ?, ?, ?)
+			`INSERT INTO notebooks(id, parent_id, title, icon, sort_order, storage_kind, storage_root, storage_path, is_excluded, created_at, updated_at)
+			 VALUES(?, ?, ?, '', 0, ?, ?, ?, 0, ?, ?)
 			 ON CONFLICT(id) DO UPDATE SET
 			   parent_id = excluded.parent_id,
 			   title = excluded.title,
 			   storage_kind = excluded.storage_kind,
 			   storage_root = excluded.storage_root,
 			   storage_path = excluded.storage_path,
+			   is_excluded = 0,
 			   updated_at = excluded.updated_at`,
 			id, parentID, directory.Title, storageKindDirectory, rootPath, directory.RelativePath,
 			directory.ModTime, directory.ModTime,
@@ -342,7 +360,7 @@ func (s *Store) reindexManagedDirectory(ctx context.Context, rootID string, root
 	noteIDs := make(map[string]bool, len(scan.Notes))
 	resourceCount := 0
 	for _, note := range scan.Notes {
-		noteID := existingNotes[strings.ToLower(note.AbsolutePath)]
+		noteID := existingNotes[strings.ToLower(filepath.Clean(note.AbsolutePath))].ID
 		if noteID == "" {
 			noteID = newID()
 		}
@@ -354,8 +372,8 @@ func (s *Store) reindexManagedDirectory(ctx context.Context, rootID string, root
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO notes(id, notebook_id, title, body, is_todo, todo_due, todo_completed,
 			 source_url, author, is_conflict, is_pinned, sort_order, storage_kind, external_path,
-			 external_mtime, external_size, created_at, updated_at, deleted_at)
-			 VALUES(?, ?, ?, ?, 0, 0, 0, '', '', 0, 0, 0, ?, ?, ?, ?, ?, ?, 0)
+			 external_mtime, external_size, is_excluded, created_at, updated_at, deleted_at)
+			 VALUES(?, ?, ?, ?, 0, 0, 0, '', '', 0, 0, 0, ?, ?, ?, ?, 0, ?, ?, 0)
 			 ON CONFLICT(id) DO UPDATE SET
 			   notebook_id = excluded.notebook_id,
 			   title = excluded.title,
@@ -364,6 +382,7 @@ func (s *Store) reindexManagedDirectory(ctx context.Context, rootID string, root
 			   external_path = excluded.external_path,
 			   external_mtime = excluded.external_mtime,
 			   external_size = excluded.external_size,
+			   is_excluded = 0,
 			   updated_at = excluded.updated_at`,
 			noteID, notebookID, note.Title, note.Body, storageKindDirectory, note.AbsolutePath,
 			note.ModTime, note.Size, note.ModTime, note.ModTime,
@@ -383,27 +402,49 @@ func (s *Store) reindexManagedDirectory(ctx context.Context, rootID string, root
 		resourceCount += count
 	}
 
-	for path, noteID := range existingNotes {
-		if noteIDs[noteID] {
+	for _, existing := range existingNotes {
+		if noteIDs[existing.ID] {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM notes_fts WHERE note_id = ?`, noteID); err != nil {
+		if managedPathExcluded(rootPath, existing.ExternalPath, false, exclusions) {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE notes SET is_excluded = 1 WHERE id = ?`,
+				existing.ID,
+			); err != nil {
+				return ManagedDirectoryReport{}, err
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM notes_fts WHERE note_id = ?`, existing.ID); err != nil {
 			return ManagedDirectoryReport{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM resources WHERE note_id = ?`, noteID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM resources WHERE note_id = ?`, existing.ID); err != nil {
 			return ManagedDirectoryReport{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM notes WHERE id = ?`, noteID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM notes WHERE id = ?`, existing.ID); err != nil {
 			return ManagedDirectoryReport{}, err
 		}
-		delete(existingNotes, path)
 	}
 
-	for path, notebookID := range existingNotebooks {
+	for path, existing := range existingNotebooks {
 		if seenNotebookPaths[path] {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM notebooks WHERE id = ?`, notebookID); err != nil {
+		if managedPathExcluded(
+			rootPath,
+			filepath.Join(rootPath, filepath.FromSlash(existing.StoragePath)),
+			true,
+			exclusions,
+		) {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE notebooks SET is_excluded = 1 WHERE id = ?`,
+				existing.ID,
+			); err != nil {
+				return ManagedDirectoryReport{}, err
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM notebooks WHERE id = ?`, existing.ID); err != nil {
 			return ManagedDirectoryReport{}, err
 		}
 	}
@@ -424,7 +465,17 @@ func (s *Store) reindexManagedDirectory(ctx context.Context, rootID string, root
 	}, nil
 }
 
-func managedNotebooksByPath(ctx context.Context, tx *sql.Tx, rootPath string) (map[string]string, error) {
+type managedStoredPath struct {
+	ID           string
+	StoragePath  string
+	ExternalPath string
+}
+
+func managedNotebooksByPath(
+	ctx context.Context,
+	tx *sql.Tx,
+	rootPath string,
+) (map[string]managedStoredPath, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id, storage_path FROM notebooks
 		 WHERE storage_kind = ? AND storage_root = ? COLLATE NOCASE`,
@@ -434,18 +485,24 @@ func managedNotebooksByPath(ctx context.Context, tx *sql.Tx, rootPath string) (m
 		return nil, err
 	}
 	defer rows.Close()
-	items := make(map[string]string)
+	items := make(map[string]managedStoredPath)
 	for rows.Next() {
 		var id, relativePath string
 		if err := rows.Scan(&id, &relativePath); err != nil {
 			return nil, err
 		}
-		items[strings.ToLower(relativePath)] = id
+		items[strings.ToLower(relativePath)] = managedStoredPath{
+			ID: id, StoragePath: relativePath,
+		}
 	}
 	return items, rows.Err()
 }
 
-func managedNotesByPath(ctx context.Context, tx *sql.Tx, rootID string) (map[string]string, error) {
+func managedNotesByPath(
+	ctx context.Context,
+	tx *sql.Tx,
+	rootID string,
+) (map[string]managedStoredPath, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT n.id, n.external_path
 		 FROM notes n
@@ -459,13 +516,15 @@ func managedNotesByPath(ctx context.Context, tx *sql.Tx, rootID string) (map[str
 		return nil, err
 	}
 	defer rows.Close()
-	items := make(map[string]string)
+	items := make(map[string]managedStoredPath)
 	for rows.Next() {
 		var id, externalPath string
 		if err := rows.Scan(&id, &externalPath); err != nil {
 			return nil, err
 		}
-		items[strings.ToLower(filepath.Clean(externalPath))] = id
+		items[strings.ToLower(filepath.Clean(externalPath))] = managedStoredPath{
+			ID: id, ExternalPath: externalPath,
+		}
 	}
 	return items, rows.Err()
 }

@@ -24,6 +24,11 @@ describe('editor tabs', () => {
     expect(editorModeForTab({ ...tab('one'), mode: 'wysiwyg' })).toBe('wysiwyg');
   });
 
+  it('uses a configured default for tabs without a saved mode', () => {
+    expect(editorModeForTab(tab('one'), 'ir')).toBe('ir');
+    expect(editorModeForTab({ ...tab('one'), mode: 'sv' }, 'ir')).toBe('sv');
+  });
+
   it('uses one preview tab and activates existing pinned tabs', () => {
     let state = openEditorNote(EMPTY_EDITOR_TABS, tab('one'));
     state = openEditorNote(state, tab('two'));

@@ -256,5 +256,37 @@
     "file": "svg/list.svg",
     "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/list.svg",
     "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 33,
+    "label": "全部收合",
+    "icon": "chevron-right-solid-full",
+    "file": "svg/chevron-right-solid-full.svg",
+    "source": "Font Awesome Free 7.3.1",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 34,
+    "label": "全部展開",
+    "icon": "caret-down-solid-full",
+    "file": "svg/caret-down-solid-full.svg",
+    "source": "Font Awesome Free 7.3.1",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 35,
+    "label": "格式化表格",
+    "icon": "table-list-solid-full",
+    "file": "svg/table-list-solid-full.svg",
+    "source": "Font Awesome Free 7.3.1",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 36,
+    "label": "相簿",
+    "icon": "images",
+    "file": "svg/images.svg",
+    "source": "依相片堆疊語意重畫",
+    "origin": "custom"
   }
 ]

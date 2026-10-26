@@ -24,7 +24,9 @@ interface NoteQueryOptions {
 
 export function buildNoteListQuery(options: NoteQueryOptions): NoteQuery {
   const searching = options.search.trim() !== '';
-  let queryView = options.view.kind;
+  let queryView: NoteQuery['view'] = options.view.kind === 'dashboard'
+    ? 'all'
+    : options.view.kind;
   let notebookId = options.view.kind === 'notebook' ? options.view.id : '';
   let tagId = options.view.kind === 'tag' ? options.view.id : '';
 

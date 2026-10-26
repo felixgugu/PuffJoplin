@@ -14,12 +14,23 @@ import {
 } from './imageClipboard';
 import { bytesToBase64, renderMermaidImage } from './mermaidExport';
 import type { SourcePreviewLine, SourcePreviewTarget } from './sourceLineTarget';
+import {
+  resizeSourcePreviewBounds,
+  SOURCE_PREVIEW_MIN_HEIGHT,
+  SOURCE_PREVIEW_MIN_WIDTH,
+  SOURCE_PREVIEW_WINDOW_MARGIN,
+  type SourcePreviewResizeHandle,
+} from './sourcePreviewGeometry';
 import UiIcon from './UiIcon';
 
 interface SourceLinePreviewProps {
   target: SourcePreviewTarget;
-  anchor: SourcePreviewLine['anchor'];
+  items: readonly SourcePreviewTarget[];
+  anchor?: SourcePreviewLine['anchor'];
+  onSelect: (target: SourcePreviewTarget) => void;
   onClose: () => void;
+  onLocate: (target: SourcePreviewTarget) => void;
+  onDeleteRequest: (target: SourcePreviewTarget) => Promise<boolean>;
 }
 
 type DragState = {
@@ -38,9 +49,31 @@ type PanState = {
   originY: number;
 };
 
+type ResizeState = {
+  handle: SourcePreviewResizeHandle;
+  pointerID: number;
+  startX: number;
+  startY: number;
+  startWidth: number;
+  startHeight: number;
+  startLeft: number;
+  startTop: number;
+};
+
 const mermaidPreviewCache = new Map<string, Promise<string>>();
 const minimumZoom = 0.25;
 const maximumZoom = 8;
+const resizeHandleClass: Record<SourcePreviewResizeHandle, string> = {
+  n: 'resize-n',
+  ne: 'resize-ne',
+  e: 'resize-e',
+  se: 'resize-se',
+  s: 'resize-s',
+  sw: 'resize-sw',
+  w: 'resize-w',
+  nw: 'resize-nw',
+};
+const resizeHandles = Object.keys(resizeHandleClass) as SourcePreviewResizeHandle[];
 
 function mermaidPreviewSource(code: string): Promise<string> {
   const cached = mermaidPreviewCache.get(code);
@@ -50,6 +83,10 @@ function mermaidPreviewSource(code: string): Promise<string> {
   mermaidPreviewCache.set(code, pending);
   pending.catch(() => mermaidPreviewCache.delete(code));
   return pending;
+}
+
+function mediaKindClass(kind: SourcePreviewTarget['kind']): string {
+  return kind === 'mermaid' ? 'is-mermaid' : 'is-image';
 }
 
 function closeIcon() {
@@ -86,34 +123,93 @@ function maximizeIcon(maximized: boolean) {
   );
 }
 
+function PreviewThumbnail({
+  item,
+  active,
+  onSelect,
+}: {
+  item: SourcePreviewTarget;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const [source, setSource] = useState(item.kind === 'image' ? item.src : '');
+  const [failed, setFailed] = useState(false);
+  const label = item.kind === 'image' ? item.alt : 'Mermaid';
+  const previewContent = item.kind === 'image' ? item.src : item.code;
+
+  useEffect(() => {
+    if (item.kind === 'image') {
+      setSource(item.src);
+      setFailed(false);
+      return undefined;
+    }
+    let mounted = true;
+    setSource('');
+    setFailed(false);
+    void mermaidPreviewSource(item.code)
+      .then((value) => {
+        if (mounted) setSource(value);
+      })
+      .catch(() => {
+        if (mounted) setFailed(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [item.kind, previewContent]);
+
+  return (
+    <button
+      type="button"
+      role="option"
+      className={`source-line-preview-thumbnail${active ? ' active' : ''}`}
+      aria-current={active ? 'true' : undefined}
+      aria-selected={active}
+      aria-label={`${label}，第 ${item.lineNumber} 行`}
+      title={`第 ${item.lineNumber} 行 · ${label}`}
+      onClick={onSelect}
+    >
+      <span className={`source-line-preview-thumbnail-media ${mediaKindClass(item.kind)}`}>
+        {!failed && source
+          ? <img src={source} alt="" draggable={false} onError={() => setFailed(true)} />
+          : <UiIcon name={item.kind === 'mermaid' ? 'summary' : 'eye'} />}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 export default function SourceLinePreview({
   target,
+  items,
   anchor,
+  onSelect,
   onClose,
+  onLocate,
+  onDeleteRequest,
 }: SourceLinePreviewProps) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const panRef = useRef<PanState | null>(null);
-  const positionedTargetRef = useRef('');
-  const userMovedRef = useRef(false);
+  const resizeRef = useRef<ResizeState | null>(null);
+  const initializedRef = useRef(false);
   const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
+  const [size, setSize] = useState(() => ({
+    width: Math.min(720, window.innerWidth - 24),
+    height: Math.min(620, window.innerHeight - 24),
+  }));
   const [maximized, setMaximized] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [mermaidSource, setMermaidSource] = useState('');
   const [loading, setLoading] = useState(target.kind === 'mermaid');
   const [error, setError] = useState('');
-  const [busyAction, setBusyAction] = useState<'save' | 'copy' | null>(null);
+  const [busyAction, setBusyAction] = useState<'save' | 'copy' | 'delete' | null>(null);
   const [actionMessage, setActionMessage] = useState('');
-
-  const targetKey = target.kind === 'image'
-    ? `image:${target.lineNumber}:${target.src}`
-    : `mermaid:${target.lineNumber}:${target.code}`;
+  const currentIndex = Math.max(0, items.findIndex((item) => item.id === target.id));
+  const targetContent = target.kind === 'image' ? target.src : target.code;
 
   useEffect(() => {
-    positionedTargetRef.current = '';
-    userMovedRef.current = false;
-    setMaximized(false);
     setZoom(1);
     setPan({ x: 0, y: 0 });
     setError('');
@@ -139,7 +235,7 @@ export default function SourceLinePreview({
     return () => {
       active = false;
     };
-  }, [target, targetKey]);
+  }, [target.id, target.kind, targetContent]);
 
   useEffect(() => {
     if (!actionMessage) return undefined;
@@ -148,19 +244,17 @@ export default function SourceLinePreview({
   }, [actionMessage]);
 
   useLayoutEffect(() => {
-    if (maximized) return;
+    if (initializedRef.current) return;
     const card = cardRef.current;
     if (!card) return;
-    const targetChanged = positionedTargetRef.current !== targetKey;
-    if (!targetChanged && userMovedRef.current) return;
     const rect = card.getBoundingClientRect();
     const margin = 12;
-    let left = anchor.right + 14;
-    if (left + rect.width > window.innerWidth - margin) {
+    let left = anchor ? anchor.right + 14 : (window.innerWidth - rect.width) / 2;
+    if (anchor && left + rect.width > window.innerWidth - margin) {
       left = anchor.left - rect.width - 14;
     }
     if (left < margin) left = margin;
-    let top = anchor.top;
+    let top = anchor ? anchor.top : (window.innerHeight - rect.height) / 2;
     if (top + rect.height > window.innerHeight - margin) {
       top = window.innerHeight - rect.height - margin;
     }
@@ -169,8 +263,43 @@ export default function SourceLinePreview({
       top: Math.max(margin, top),
       ready: true,
     });
-    positionedTargetRef.current = targetKey;
-  }, [anchor, maximized, mermaidSource, loading, error, targetKey]);
+    card.focus({ preventScroll: true });
+    initializedRef.current = true;
+  }, [anchor]);
+
+  useEffect(() => {
+    const clampToWindow = () => {
+      setSize((current) => ({
+        width: Math.max(
+          SOURCE_PREVIEW_MIN_WIDTH,
+          Math.min(current.width, window.innerWidth - 24),
+        ),
+        height: Math.max(
+          SOURCE_PREVIEW_MIN_HEIGHT,
+          Math.min(current.height, window.innerHeight - 24),
+        ),
+      }));
+      setPosition((current) => ({
+        ...current,
+        left: Math.max(SOURCE_PREVIEW_WINDOW_MARGIN, Math.min(
+          current.left,
+          window.innerWidth - SOURCE_PREVIEW_MIN_WIDTH - SOURCE_PREVIEW_WINDOW_MARGIN,
+        )),
+        top: Math.max(SOURCE_PREVIEW_WINDOW_MARGIN, Math.min(
+          current.top,
+          window.innerHeight - SOURCE_PREVIEW_MIN_HEIGHT - SOURCE_PREVIEW_WINDOW_MARGIN,
+        )),
+      }));
+    };
+    window.addEventListener('resize', clampToWindow);
+    return () => window.removeEventListener('resize', clampToWindow);
+  }, []);
+
+  const selectRelative = (direction: -1 | 1) => {
+    if (items.length < 2) return;
+    const index = (currentIndex + direction + items.length) % items.length;
+    onSelect(items[index]);
+  };
 
   const startDrag = (event: ReactPointerEvent<HTMLElement>) => {
     if (
@@ -194,25 +323,20 @@ export default function SourceLinePreview({
   const dragWindow = (event: ReactPointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerID !== event.pointerId || maximized) return;
-    const card = cardRef.current;
-    if (!card) return;
-    const rect = card.getBoundingClientRect();
-    const margin = 8;
     const left = Math.max(
-      margin,
+      SOURCE_PREVIEW_WINDOW_MARGIN,
       Math.min(
         drag.originLeft + event.clientX - drag.startX,
-        window.innerWidth - rect.width - margin,
+        window.innerWidth - size.width - SOURCE_PREVIEW_WINDOW_MARGIN,
       ),
     );
     const top = Math.max(
-      margin,
+      SOURCE_PREVIEW_WINDOW_MARGIN,
       Math.min(
         drag.originTop + event.clientY - drag.startY,
-        window.innerHeight - rect.height - margin,
+        window.innerHeight - size.height - SOURCE_PREVIEW_WINDOW_MARGIN,
       ),
     );
-    userMovedRef.current = true;
     setPosition({ left, top, ready: true });
   };
 
@@ -224,8 +348,61 @@ export default function SourceLinePreview({
     }
   };
 
+  const startResize = (
+    event: ReactPointerEvent<HTMLSpanElement>,
+    handle: SourcePreviewResizeHandle,
+  ) => {
+    if (maximized || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeRef.current = {
+      handle,
+      pointerID: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: size.width,
+      startHeight: size.height,
+      startLeft: position.left,
+      startTop: position.top,
+    };
+  };
+
+  const resizeWindow = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerID !== event.pointerId || maximized) return;
+    const resized = resizeSourcePreviewBounds(
+      {
+        left: resize.startLeft,
+        top: resize.startTop,
+        width: resize.startWidth,
+        height: resize.startHeight,
+      },
+      resize.handle,
+      event.clientX - resize.startX,
+      event.clientY - resize.startY,
+      window.innerWidth,
+      window.innerHeight,
+    );
+    setSize({ width: resized.width, height: resized.height });
+    setPosition({ left: resized.left, top: resized.top, ready: true });
+  };
+
+  const stopResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (resizeRef.current?.pointerID !== event.pointerId) return;
+    resizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   const startPan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (
+      event.button !== 0 ||
+      (event.target as Element).closest('button')
+    ) {
+      return;
+    }
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     panRef.current = {
@@ -317,10 +494,30 @@ export default function SourceLinePreview({
     }
   };
 
+  const requestDelete = async () => {
+    if (busyAction) return;
+    setBusyAction('delete');
+    setActionMessage('');
+    try {
+      if (await onDeleteRequest(target)) setActionMessage('已從內文移除媒體');
+    } catch (reason) {
+      setActionMessage(`刪除失敗：${reason instanceof Error ? reason.message : String(reason)}`);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const source = target.kind === 'image' ? target.src : mermaidSource;
   const title = target.kind === 'image' ? '圖片預覽' : 'Mermaid 預覽';
   const imageStyle: CSSProperties = {
     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+  };
+  const cardStyle: CSSProperties | undefined = maximized ? undefined : {
+    left: position.left,
+    top: position.top,
+    width: size.width,
+    height: size.height,
+    opacity: position.ready ? 1 : 0,
   };
 
   return createPortal(
@@ -329,12 +526,18 @@ export default function SourceLinePreview({
       className={`source-line-preview${maximized ? ' is-maximized' : ''}`}
       role="dialog"
       aria-label={`${title}，第 ${target.lineNumber} 行`}
-      style={maximized ? undefined : {
-        left: position.left,
-        top: position.top,
-        opacity: position.ready ? 1 : 0,
-      }}
+      tabIndex={-1}
+      style={cardStyle}
       onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          selectRelative(-1);
+        } else if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          selectRelative(1);
+        }
+      }}
     >
       <header
         className="source-line-preview-header"
@@ -345,9 +548,30 @@ export default function SourceLinePreview({
       >
         <div className="source-line-preview-title">
           <strong>{title}</strong>
-          <span>第 {target.lineNumber} 行</span>
+          <span>
+            第 {target.lineNumber}
+            {target.endLine !== target.lineNumber ? `–${target.endLine}` : ''} 行
+            {' · '}{currentIndex + 1}/{items.length}
+          </span>
         </div>
         <div className="source-line-preview-actions">
+          <button
+            type="button"
+            aria-label="定位到內文"
+            title="定位到內文"
+            onClick={() => onLocate(target)}
+          >
+            <UiIcon name="locate" />
+          </button>
+          <button
+            type="button"
+            aria-label="從內文刪除"
+            title="從內文刪除"
+            disabled={busyAction !== null}
+            onClick={() => void requestDelete()}
+          >
+            <UiIcon name="trash" />
+          </button>
           <button
             type="button"
             aria-label="另存新檔"
@@ -410,7 +634,7 @@ export default function SourceLinePreview({
         </div>
       </header>
       <div
-        className={`source-line-preview-body is-${target.kind}`}
+        className={`source-line-preview-body ${mediaKindClass(target.kind)}`}
         onPointerDown={startPan}
         onPointerMove={movePan}
         onPointerUp={stopPan}
@@ -420,6 +644,16 @@ export default function SourceLinePreview({
           changeZoom(event.deltaY < 0 ? 1.12 : 1 / 1.12);
         }}
       >
+        <button
+          type="button"
+          className="source-line-preview-nav previous"
+          aria-label="上一張"
+          title="上一張（←）"
+          disabled={items.length < 2}
+          onClick={() => selectRelative(-1)}
+        >
+          <UiIcon name="chevron-right" />
+        </button>
         {actionMessage && (
           <div className="source-line-preview-action-message" role="status">
             {actionMessage}
@@ -445,7 +679,38 @@ export default function SourceLinePreview({
             }}
           />
         )}
+        <button
+          type="button"
+          className="source-line-preview-nav next"
+          aria-label="下一張"
+          title="下一張（→）"
+          disabled={items.length < 2}
+          onClick={() => selectRelative(1)}
+        >
+          <UiIcon name="chevron-right" />
+        </button>
       </div>
+      <div className="source-line-preview-gallery" role="listbox" aria-label="筆記媒體畫廊">
+        {items.map((item) => (
+          <PreviewThumbnail
+            key={item.id}
+            item={item}
+            active={item.id === target.id}
+            onSelect={() => onSelect(item)}
+          />
+        ))}
+      </div>
+      {!maximized && resizeHandles.map((handle) => (
+        <span
+          key={handle}
+          className={`source-line-preview-resize ${resizeHandleClass[handle]}`}
+          aria-hidden="true"
+          onPointerDown={(event) => startResize(event, handle)}
+          onPointerMove={resizeWindow}
+          onPointerUp={stopResize}
+          onPointerCancel={stopResize}
+        />
+      ))}
     </div>,
     document.body,
   );

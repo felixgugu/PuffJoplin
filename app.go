@@ -35,6 +35,7 @@ type App struct {
 	logger          *log.Logger
 	logFile         *os.File
 	mu              sync.Mutex
+	resourceMu      sync.Mutex
 	managedMu       sync.Mutex
 	managedWatchers map[string]*managedRootWatcher
 }
@@ -191,6 +192,11 @@ func (a *App) readyStore() (*Store, error) {
 	return a.store, nil
 }
 
+func (a *App) lockResourceMaintenance() func() {
+	a.resourceMu.Lock()
+	return a.resourceMu.Unlock
+}
+
 func (a *App) Bootstrap() (BootstrapState, error) {
 	store, err := a.readyStore()
 	if err != nil {
@@ -219,6 +225,14 @@ func (a *App) Bootstrap() (BootstrapState, error) {
 		status != "imported" && status != "dismissed"
 	state.UploadToken = a.uploadToken
 	return state, nil
+}
+
+func (a *App) Dashboard() (DashboardSnapshot, error) {
+	store, err := a.readyStore()
+	if err != nil {
+		return DashboardSnapshot{}, err
+	}
+	return store.Dashboard(a.ctx, time.Now())
 }
 
 func (a *App) InspectJoplinProfile() (JoplinProfilePreview, error) {
@@ -288,6 +302,8 @@ func (a *App) DeleteNotebook(id string, deleteChildren bool) error {
 	if err != nil {
 		return err
 	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
 	notebook, err := store.getNotebook(a.ctx, id)
 	if err != nil {
 		return errors.New("筆記本不存在")
@@ -344,6 +360,8 @@ func (a *App) UpdateNote(input NoteInput) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
 	note, err := store.UpdateNote(a.ctx, input)
 	if err == nil {
 		runtime.EventsEmit(a.ctx, "notes.changed", note.ID)
@@ -427,6 +445,8 @@ func (a *App) DeleteNotePermanently(id string) error {
 	if err != nil {
 		return err
 	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
 	if err := store.DeleteNotePermanently(a.ctx, id); err != nil {
 		return err
 	}
@@ -461,6 +481,60 @@ func (a *App) Settings() (map[string]string, error) {
 		return nil, err
 	}
 	return store.Settings(a.ctx)
+}
+
+func (a *App) GetManagedDirectoryExclusions() (ManagedDirectoryExclusions, error) {
+	store, err := a.readyStore()
+	if err != nil {
+		return ManagedDirectoryExclusions{}, err
+	}
+	return store.GetManagedDirectoryExclusions(a.ctx)
+}
+
+func (a *App) SetManagedDirectoryExclusions(
+	value ManagedDirectoryExclusions,
+) (ManagedDirectoryExclusionReport, error) {
+	store, err := a.readyStore()
+	if err != nil {
+		return ManagedDirectoryExclusionReport{}, err
+	}
+	report, err := store.ApplyManagedDirectoryExclusions(a.ctx, value)
+	if err != nil {
+		return report, err
+	}
+	a.stopManagedWatchers()
+	a.startManagedWatchers()
+	runtime.EventsEmit(a.ctx, "notebooks.changed", "")
+	runtime.EventsEmit(a.ctx, "notes.changed", "")
+	runtime.EventsEmit(a.ctx, "tags.changed", "")
+	runtime.EventsEmit(a.ctx, "managedDirectory.refreshed", report)
+	return report, nil
+}
+
+func (a *App) CleanupUnusedResources() (ResourceCleanupReport, error) {
+	store, err := a.readyStore()
+	if err != nil {
+		return ResourceCleanupReport{}, err
+	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
+	report, err := store.CleanupUnusedResources(a.ctx)
+	if err != nil {
+		return report, err
+	}
+	if a.logger != nil {
+		a.logger.Printf(
+			"resource cleanup: removed=%d indexed=%d orphans=%d freed=%d failed=%d recent=%d",
+			report.RemovedCount,
+			report.RemovedIndexed,
+			report.RemovedOrphans,
+			report.FreedBytes,
+			report.FailedCount,
+			report.SkippedRecent,
+		)
+	}
+	runtime.EventsEmit(a.ctx, "notes.changed", "")
+	return report, nil
 }
 
 func (a *App) SetSetting(key string, value string) error {
@@ -504,6 +578,8 @@ func (a *App) ImportJoplinProfile(sourcePath string) (ImportReport, error) {
 	if err != nil {
 		return ImportReport{}, err
 	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
 	report, err := importJoplinProfile(a.ctx, store, profilePath, func(progress float64, message string) {
 		runtime.EventsEmit(a.ctx, "import.progress", map[string]any{"progress": progress, "message": message})
 	})
@@ -551,6 +627,8 @@ func (a *App) importArchive(sourcePath string, destinationNotebookID string) (Im
 			return ImportReport{}, errors.New("未選擇檔案")
 		}
 	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
 	report, err := importArchive(a.ctx, store, sourcePath, destinationNotebookID, func(progress float64, message string) {
 		runtime.EventsEmit(a.ctx, "import.progress", map[string]any{"progress": progress, "message": message})
 	})
@@ -710,6 +788,8 @@ func (a *App) AttachResource(noteID string) (Note, error) {
 	if err != nil || path == "" {
 		return Note{}, err
 	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
 	resource, err := store.AddResource(a.ctx, noteID, path)
 	if err != nil {
 		return Note{}, err
@@ -750,6 +830,8 @@ func (a *App) PasteClipboardImage(noteID string) (Resource, error) {
 	if len(image.data) == 0 {
 		return Resource{}, errors.New("剪貼簿圖片是空的")
 	}
+	unlock := a.lockResourceMaintenance()
+	defer unlock()
 	resource, err := store.AddResourceData(a.ctx, noteID, image.filename, image.data)
 	if err != nil {
 		return Resource{}, err
@@ -915,26 +997,6 @@ func (a *App) OpenExternal(value string) error {
 
 func (a *App) OpenDataFolder() error {
 	return exec.Command("explorer.exe", a.dataDir).Start()
-}
-
-func (a *App) Confirm(title string, message string) (bool, error) {
-	response, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-		Type:          runtime.QuestionDialog,
-		Title:         title,
-		Message:       message,
-		Buttons:       []string{"No", "Yes"},
-		DefaultButton: "No",
-	})
-	return confirmDialogResult(response), err
-}
-
-func confirmDialogResult(response string) bool {
-	switch strings.ToLower(strings.TrimSpace(response)) {
-	case "yes", "ok", "確定":
-		return true
-	default:
-		return false
-	}
 }
 
 func (a *App) Quit() {

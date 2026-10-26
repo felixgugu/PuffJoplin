@@ -140,6 +140,86 @@ type Resource struct {
 	UpdatedAt    int64  `json:"updatedAt"`
 }
 
+type ResourceCleanupReport struct {
+	RemovedCount   int   `json:"removedCount"`
+	RemovedIndexed int   `json:"removedIndexed"`
+	RemovedOrphans int   `json:"removedOrphans"`
+	FreedBytes     int64 `json:"freedBytes"`
+	FailedCount    int   `json:"failedCount"`
+	SkippedRecent  int   `json:"skippedRecent"`
+}
+
+type DashboardCounts struct {
+	ActiveNotes    int `json:"activeNotes"`
+	TrashNotes     int `json:"trashNotes"`
+	Notebooks      int `json:"notebooks"`
+	Tags           int `json:"tags"`
+	OpenTodos      int `json:"openTodos"`
+	CompletedTodos int `json:"completedTodos"`
+}
+
+type DashboardTodo struct {
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	NotebookTitle string `json:"notebookTitle"`
+	TodoDue       int64  `json:"todoDue"`
+}
+
+type DashboardRecentNote struct {
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	NotebookTitle string `json:"notebookTitle"`
+	UpdatedAt     int64  `json:"updatedAt"`
+}
+
+type DashboardActivityDay struct {
+	Date    string `json:"date"`
+	Created int    `json:"created"`
+	Updated int    `json:"updated"`
+}
+
+type DashboardNotebookStat struct {
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	NoteCount     int    `json:"noteCount"`
+	OpenTodoCount int    `json:"openTodoCount"`
+	StorageKind   string `json:"storageKind"`
+}
+
+type DashboardMedia struct {
+	ImageReferences      int   `json:"imageReferences"`
+	MermaidDiagrams      int   `json:"mermaidDiagrams"`
+	AttachmentCount      int   `json:"attachmentCount"`
+	AttachmentBytes      int64 `json:"attachmentBytes"`
+	UnusedResourceCount  int   `json:"unusedResourceCount"`
+	UnusedResourceBytes  int64 `json:"unusedResourceBytes"`
+	MissingResourceCount int   `json:"missingResourceCount"`
+}
+
+type DashboardManagedRoot struct {
+	NotebookID string `json:"notebookId"`
+	Title      string `json:"title"`
+	Path       string `json:"path"`
+	Available  bool   `json:"available"`
+}
+
+type DashboardHealth struct {
+	DataDir      string                 `json:"dataDir"`
+	ManagedRoots []DashboardManagedRoot `json:"managedRoots"`
+}
+
+type DashboardSnapshot struct {
+	Counts      DashboardCounts         `json:"counts"`
+	Todos       []DashboardTodo         `json:"todos"`
+	Recent      []DashboardRecentNote   `json:"recent"`
+	Activity    []DashboardActivityDay  `json:"activity"`
+	Notebooks   []DashboardNotebookStat `json:"notebooks"`
+	Tags        []Tag                   `json:"tags"`
+	Media       DashboardMedia          `json:"media"`
+	Health      DashboardHealth         `json:"health"`
+	GeneratedAt int64                   `json:"generatedAt"`
+}
+
 type ManagedDirectoryReport struct {
 	NotebookID string          `json:"notebookId"`
 	RootPath   string          `json:"rootPath"`
@@ -148,6 +228,22 @@ type ManagedDirectoryReport struct {
 	Resources  int             `json:"resources"`
 	Skipped    int             `json:"skipped"`
 	Warnings   []ImportWarning `json:"warnings"`
+}
+
+type ManagedDirectoryExclusions struct {
+	FolderNames       []string `json:"folderNames"`
+	MarkdownFileNames []string `json:"markdownFileNames"`
+}
+
+type ManagedDirectoryExclusionReport struct {
+	Exclusions        ManagedDirectoryExclusions `json:"exclusions"`
+	RootCount         int                        `json:"rootCount"`
+	HiddenNotebooks   int                        `json:"hiddenNotebooks"`
+	HiddenNotes       int                        `json:"hiddenNotes"`
+	RestoredNotebooks int                        `json:"restoredNotebooks"`
+	RestoredNotes     int                        `json:"restoredNotes"`
+	HiddenNoteIDs     []string                   `json:"hiddenNoteIds"`
+	Warnings          []ImportWarning            `json:"warnings"`
 }
 
 type ImportRequest struct {

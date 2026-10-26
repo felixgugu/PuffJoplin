@@ -1,7 +1,10 @@
 import type {
   BootstrapState,
+  DashboardSnapshot,
   ImportReport,
   JoplinProfilePreview,
+  ManagedDirectoryExclusionReport,
+  ManagedDirectoryExclusions,
   ManagedDirectoryReport,
   NoteDocxExport,
   NotebookDocxExport,
@@ -14,6 +17,7 @@ import type {
   NoteSummary,
   Notebook,
   Resource,
+  ResourceCleanupReport,
   Tag,
 } from './types';
 
@@ -54,6 +58,7 @@ async function invoke<T>(method: string, ...args: unknown[]): Promise<T> {
 
 export const api = {
   bootstrap: () => invoke<BootstrapState>('Bootstrap'),
+  dashboard: () => invoke<DashboardSnapshot>('Dashboard'),
   inspectJoplinProfile: () => invoke<JoplinProfilePreview>('InspectJoplinProfile'),
   dismissJoplinImportPrompt: () => invoke<void>('DismissJoplinImportPrompt'),
   setWindowTheme: (theme: 'light' | 'dark') => invoke<void>('SetWindowTheme', theme),
@@ -77,6 +82,10 @@ export const api = {
   openManagedMarkdownNotebook: () => invoke<ManagedDirectoryReport>('OpenManagedMarkdownNotebook'),
   refreshManagedNotebook: (notebookId: string) =>
     invoke<ManagedDirectoryReport>('RefreshManagedNotebook', notebookId),
+  getManagedDirectoryExclusions: () =>
+    invoke<ManagedDirectoryExclusions>('GetManagedDirectoryExclusions'),
+  setManagedDirectoryExclusions: (value: ManagedDirectoryExclusions) =>
+    invoke<ManagedDirectoryExclusionReport>('SetManagedDirectoryExclusions', value),
   revealNotebook: (notebookId: string) => invoke<void>('RevealNotebook', notebookId),
   createNotebook: (title: string, parentId = '') => invoke<Notebook>('CreateNotebook', title, parentId),
   renameNotebook: (id: string, title: string) => invoke<Notebook>('RenameNotebook', id, title),
@@ -99,6 +108,7 @@ export const api = {
   setNoteTags: (noteId: string, tags: string[]) => invoke<void>('SetNoteTags', noteId, tags),
   settings: () => invoke<Record<string, string>>('Settings'),
   setSetting: (key: string, value: string) => invoke<void>('SetSetting', key, value),
+  cleanupUnusedResources: () => invoke<ResourceCleanupReport>('CleanupUnusedResources'),
   selectJoplinProfile: () => invoke<string>('SelectJoplinProfile'),
   importJoplinProfile: (sourcePath = '') => invoke<ImportReport>('ImportJoplinProfile', sourcePath),
   importArchive: (sourcePath = '') => invoke<ImportReport>('ImportArchive', sourcePath),
@@ -131,7 +141,6 @@ export const api = {
     invoke<string>('SaveImageAs', filename, dataBase64),
   openExternal: (url: string) => invoke<void>('OpenExternal', url),
   openDataFolder: () => invoke<void>('OpenDataFolder'),
-  confirm: (title: string, message: string) => invoke<boolean>('Confirm', title, message),
 };
 
 type EventCallback = (data: unknown) => void;

@@ -159,6 +159,44 @@ describe('stylesheet structure', () => {
     expect(hiddenDisplayImportant).toBe(true);
   });
 
+  it('lays out five settings tabs and the source appearance controls', () => {
+    const declarationsBySelector = new Map<string, Map<string, string>>();
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const selector = rule.selector.replace(/\s+/g, ' ');
+      const declarations = declarationsBySelector.get(selector) ?? new Map<string, string>();
+      for (const node of rule.nodes) {
+        if (node.type === 'decl') declarations.set(node.prop, node.value);
+      }
+      declarationsBySelector.set(selector, declarations);
+    });
+
+    expect(declarationsBySelector.get('.settings-tabs')?.get('grid-template-columns'))
+      .toBe('repeat(5, minmax(0, 1fr))');
+    expect(declarationsBySelector.get('.source-color-grid')?.get('grid-template-columns'))
+      .toBe('repeat(2, minmax(0, 1fr))');
+    expect(componentSource).toContain("color: 'var(--source-foreground)'");
+    expect(componentSource).toContain("fontSize: 'var(--source-font-size)'");
+    expect(componentSource).toContain("borderLeftWidth: 'var(--source-caret-width)'");
+  });
+
+  it('uses a white album background for transparent Mermaid previews', () => {
+    const backgrounds = new Map<string, string>();
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const background = rule.nodes.find(
+        (node) => node.type === 'decl' && node.prop === 'background',
+      );
+      if (background?.type === 'decl') {
+        backgrounds.set(rule.selector.replace(/\s+/g, ' '), background.value);
+      }
+    });
+
+    expect(backgrounds.get('.source-line-preview-body.is-mermaid')).toBe('#ffffff');
+    expect(backgrounds.get('.source-line-preview-thumbnail-media.is-mermaid'))
+      .toBe('#ffffff');
+  });
+
   it('shows every cover variable without pushing properties to the bottom', () => {
     let sizingRuleFound = false;
     root.walkRules((rule) => {
@@ -174,6 +212,33 @@ describe('stylesheet structure', () => {
         declarations.has('min-height|0');
     });
     expect(sizingRuleFound).toBe(true);
+  });
+
+  it('keeps the PDF cover preview and inspector independently scrollable', () => {
+    const expected = new Map<string, Map<string, string>>();
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const selector = rule.selector.replace(/\s+/g, ' ');
+      if (
+        selector !== '.pdf-cover-canvas-shell' &&
+        selector !== '.pdf-cover-inspector'
+      ) {
+        return;
+      }
+      const declarations = expected.get(selector) ?? new Map<string, string>();
+      for (const node of rule.nodes) {
+        if (node.type === 'decl') declarations.set(node.prop, node.value);
+      }
+      expected.set(selector, declarations);
+    });
+
+    const canvas = expected.get('.pdf-cover-canvas-shell');
+    const inspector = expected.get('.pdf-cover-inspector');
+    expect(canvas?.get('overflow-y')).toBe('auto');
+    expect(canvas?.get('max-height')).toBe('min(56vh, 560px)');
+    expect(canvas?.get('scrollbar-gutter')).toBe('stable');
+    expect(inspector?.get('overflow-y')).toBe('auto');
+    expect(inspector?.get('max-height')).toBe('min(56vh, 560px)');
   });
 
   it('keeps cover margin guides non-interactive and out of print output', () => {

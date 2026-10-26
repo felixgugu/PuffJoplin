@@ -15,8 +15,10 @@ import {
   serializePDFCoverDesign,
   type PDFCoverDesign,
 } from './coverDesign';
+import Dashboard from './Dashboard';
 import { convertNotebookMarkdownToDocx } from './docxExport';
 import EditorTabBar from './EditorTabBar';
+import EditorSettings from './EditorSettings';
 import FreeNumberInput from './FreeNumberInput';
 import {
   activateEditorTab as activateEditorTabState,
@@ -35,16 +37,31 @@ import {
   type EditorTabsState,
 } from './editorTabs';
 import {
-  parseShowSourceLineNumbers,
+  defaultEditorPreferences,
+  EDITOR_PREFERENCES_KEY,
+  EDITOR_PREFERENCES_SETTING,
+  parseEditorPreferences,
+  serializeEditorPreferences,
+  SOURCE_APPEARANCE_VARIABLE_NAMES,
   SOURCE_LINE_NUMBERS_KEY,
+  sourceEditorCSSVariables,
 } from './editorPreferences';
 import GlobalSearch from './GlobalSearch';
 import { KEYBOARD_SHORTCUT_GROUPS } from './keyboardShortcuts';
+import {
+  addManagedExclusionName,
+  emptyManagedDirectoryExclusions,
+  managedDirectoryExclusionMessage,
+  managedDirectoryExclusionsEqual,
+  removeManagedExclusionName,
+} from './managedDirectoryExclusions';
 import { onboardingDecision } from './onboarding';
 import { noteInfoFilledCount } from './noteInfo';
 import NoteAdditionalInfoDialog from './NoteAdditionalInfoDialog';
 import PdfCoverDesigner from './PdfCoverDesigner';
+import { resourceCleanupMessage } from './resourceCleanup';
 import { toEditorMarkdown } from './resourceUrls';
+import { useConfirmDialog } from './useConfirmDialog';
 import { extractMermaidBlocks } from './mermaidBlocks';
 import {
   bytesToBase64,
@@ -152,8 +169,10 @@ import {
 } from './typography';
 import type {
   BootstrapState,
+  DashboardSnapshot,
   ImportReport,
   JoplinProfilePreview,
+  ManagedDirectoryExclusions,
   Note,
   NoteExportFormat,
   NoteInfoField,
@@ -255,6 +274,7 @@ type NotebookDialogState = {
 
 const SETTINGS_TABS = [
   { id: 'appearance', label: '外觀' },
+  { id: 'editor', label: '編輯' },
   { id: 'pdf', label: 'PDF' },
   { id: 'shortcuts', label: '快捷鍵' },
   { id: 'data', label: '資料' },
@@ -283,6 +303,9 @@ export default function App() {
   const [tagSaving, setTagSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [fatalError, setFatalError] = useState('');
+  const [dashboardSnapshot, setDashboardSnapshot] = useState<DashboardSnapshot | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState('');
   const [joplinPreview, setJoplinPreview] = useState<JoplinProfilePreview | null>(null);
   const [modal, setModal] = useState<
     | { kind: 'import-report'; report: ImportReport }
@@ -306,6 +329,20 @@ export default function App() {
   const [pdfWatermarkShowBorder, setPdfWatermarkShowBorder] = useState(false);
   const [pdfSettingsLoaded, setPdfSettingsLoaded] = useState(false);
   const [importProgress, setImportProgress] = useState<{ progress: number; message: string } | null>(null);
+  const [resourceCleanupRunning, setResourceCleanupRunning] = useState(false);
+  const [resourceCleanupResult, setResourceCleanupResult] = useState('');
+  const [managedExclusions, setManagedExclusions] = useState<ManagedDirectoryExclusions>(
+    emptyManagedDirectoryExclusions,
+  );
+  const [savedManagedExclusions, setSavedManagedExclusions] = useState<ManagedDirectoryExclusions>(
+    emptyManagedDirectoryExclusions,
+  );
+  const [folderExclusionInput, setFolderExclusionInput] = useState('');
+  const [markdownExclusionInput, setMarkdownExclusionInput] = useState('');
+  const [managedExclusionsLoading, setManagedExclusionsLoading] = useState(false);
+  const [managedExclusionsApplying, setManagedExclusionsApplying] = useState(false);
+  const [managedExclusionsError, setManagedExclusionsError] = useState('');
+  const [managedExclusionsResult, setManagedExclusionsResult] = useState('');
   const [leftWidth, setLeftWidth] = useState(() => storedWidth(SIDEBAR_WIDTH_KEY, 270, 210, 420));
   const [listWidth, setListWidth] = useState(() => storedWidth(NOTE_LIST_WIDTH_KEY, 330, 250, 480));
   const [noteListCollapsed, setNoteListCollapsed] = useState(
@@ -334,9 +371,13 @@ export default function App() {
   const [showNoteSummary, setShowNoteSummary] = useState(
     () => parseShowNoteSummary(localStorage.getItem(NOTE_LIST_SUMMARY_KEY)),
   );
-  const [showSourceLineNumbers, setShowSourceLineNumbers] = useState(
-    () => parseShowSourceLineNumbers(localStorage.getItem(SOURCE_LINE_NUMBERS_KEY)),
+  const [editorPreferences, setEditorPreferences] = useState(
+    () => parseEditorPreferences(
+      localStorage.getItem(EDITOR_PREFERENCES_KEY),
+      localStorage.getItem(SOURCE_LINE_NUMBERS_KEY),
+    ),
   );
+  const [editorPreferencesLoaded, setEditorPreferencesLoaded] = useState(false);
   const [searchScope, setSearchScope] = useState<SearchScope>(
     () => parseSearchScope(localStorage.getItem(SEARCH_SCOPE_KEY)),
   );
@@ -394,11 +435,13 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
   );
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
   const saveTimer = useRef<number | null>(null);
   const editorRef = useRef<VditorEditorHandle | null>(null);
   const notebookDialogInputRef = useRef<HTMLInputElement | null>(null);
   const newNotebookMenuRef = useRef<HTMLDivElement | null>(null);
   const editorTabsRef = useRef(editorTabs);
+  const viewRef = useRef(view);
   const currentRef = useRef(current);
   const editorNoteCacheRef = useRef(editorNoteCache);
   const initializedRef = useRef(false);
@@ -406,10 +449,12 @@ export default function App() {
   const savingRef = useRef(false);
   const pendingSaveRef = useRef(false);
   const listRequestRef = useRef(0);
+  const dashboardRequestRef = useRef(0);
   const lastListFilterRef = useRef('');
   const lastSummaryToggleAtRef = useRef(0);
 
   currentRef.current = current;
+  viewRef.current = view;
   editorTabsRef.current = editorTabs;
   editorNoteCacheRef.current = editorNoteCache;
 
@@ -556,8 +601,27 @@ export default function App() {
   }, [showNoteSummary]);
 
   useEffect(() => {
-    localStorage.setItem(SOURCE_LINE_NUMBERS_KEY, String(showSourceLineNumbers));
-  }, [showSourceLineNumbers]);
+    const root = document.documentElement;
+    for (const variable of SOURCE_APPEARANCE_VARIABLE_NAMES) {
+      root.style.removeProperty(variable);
+    }
+    if (editorPreferences.customSourceAppearance) {
+      const profile = editorPreferences.sourceAppearance[theme];
+      for (const [variable, value] of Object.entries(sourceEditorCSSVariables(profile))) {
+        root.style.setProperty(variable, value);
+      }
+    }
+  }, [editorPreferences, theme]);
+
+  useEffect(() => {
+    if (!editorPreferencesLoaded) return undefined;
+    const serialized = serializeEditorPreferences(editorPreferences);
+    localStorage.setItem(EDITOR_PREFERENCES_KEY, serialized);
+    const timer = window.setTimeout(() => {
+      void api.setSetting(EDITOR_PREFERENCES_SETTING, serialized);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [editorPreferences, editorPreferencesLoaded]);
 
   useEffect(() => {
     localStorage.setItem(SEARCH_SCOPE_KEY, searchScope);
@@ -671,6 +735,22 @@ export default function App() {
     window.setTimeout(() => setToast((value) => value === message ? '' : value), 2800);
   }, []);
 
+  const refreshDashboard = useCallback(async () => {
+    const requestID = ++dashboardRequestRef.current;
+    setDashboardLoading(true);
+    try {
+      const snapshot = await api.dashboard();
+      if (requestID !== dashboardRequestRef.current) return;
+      setDashboardSnapshot(snapshot);
+      setDashboardError('');
+    } catch (error) {
+      if (requestID !== dashboardRequestRef.current) return;
+      setDashboardError(errorMessage(error));
+    } finally {
+      if (requestID === dashboardRequestRef.current) setDashboardLoading(false);
+    }
+  }, []);
+
   const cacheEditorNote = useCallback((note: Note) => {
     if (!note.id) return;
     if (editorNoteCacheRef.current[note.id] === note) return;
@@ -707,6 +787,16 @@ export default function App() {
     const [nextNotebooks, nextTags] = await Promise.all([api.listNotebooks(), api.listTags()]);
     setNotebooks(nextNotebooks);
     setTags(nextTags);
+    setView((current) => {
+      if (current.kind === 'notebook' &&
+        !nextNotebooks.some((notebook) => notebook.id === current.id)) {
+        return { kind: 'all' };
+      }
+      if (current.kind === 'tag' && !nextTags.some((tag) => tag.id === current.id)) {
+        return { kind: 'all' };
+      }
+      return current;
+    });
   }, []);
 
   const searchNotebookID = view.kind === 'notebook' ? view.id : current.notebookId;
@@ -836,6 +926,140 @@ export default function App() {
     return !saveFailed && !dirtyRef.current;
   }, [cacheEditorNote, notify, refreshNotes]);
 
+  const cleanupUnusedResources = useCallback(async () => {
+    if (resourceCleanupRunning) return;
+    const confirmed = await confirmAction({
+      title: '資源檔清理',
+      message: '將永久刪除未被任何筆記引用的 PuffJoplin 資源，以及 data\\resources 內沒有索引的孤兒檔。垃圾桶中的引用會保留；直接管理筆記本的外部檔案不會處理。',
+      confirmLabel: '開始清理',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    if (savingRef.current) {
+      const message = '筆記正在儲存，請稍後再執行資源檔清理。';
+      setResourceCleanupResult(message);
+      notify(message);
+      return;
+    }
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (dirtyRef.current) {
+      const saved = await saveCurrent();
+      if (!saved) {
+        const message = '筆記尚未儲存完成，已取消資源檔清理。';
+        setResourceCleanupResult(message);
+        notify(message);
+        return;
+      }
+    }
+
+    setResourceCleanupRunning(true);
+    setResourceCleanupResult('');
+    try {
+      const report = await api.cleanupUnusedResources();
+      const message = resourceCleanupMessage(report);
+      setResourceCleanupResult(message);
+      notify(message);
+      try {
+        await Promise.all([refreshNotes(), refreshDashboard()]);
+        const activeID = currentRef.current.id;
+        if (activeID) {
+          const refreshed = await api.getNote(activeID);
+          cacheEditorNote(refreshed);
+          setCurrent((note) => note.id === refreshed.id ? refreshed : note);
+        }
+      } catch (error) {
+        notify(`資源已清理，但重新整理筆記失敗：${errorMessage(error)}`);
+      }
+    } catch (error) {
+      const message = `資源清理失敗：${errorMessage(error)}`;
+      setResourceCleanupResult(message);
+      notify(message);
+    } finally {
+      setResourceCleanupRunning(false);
+    }
+  }, [
+    cacheEditorNote,
+    notify,
+    refreshDashboard,
+    refreshNotes,
+    resourceCleanupRunning,
+    saveCurrent,
+    confirmAction,
+  ]);
+
+  const loadManagedDirectoryExclusions = useCallback(async () => {
+    setManagedExclusionsLoading(true);
+    setManagedExclusionsError('');
+    setManagedExclusionsResult('');
+    setFolderExclusionInput('');
+    setMarkdownExclusionInput('');
+    try {
+      const value = await api.getManagedDirectoryExclusions();
+      setManagedExclusions(value);
+      setSavedManagedExclusions(value);
+    } catch (error) {
+      const message = `讀取直接管理筆記本排除設定失敗：${errorMessage(error)}`;
+      setManagedExclusionsError(message);
+      notify(message);
+    } finally {
+      setManagedExclusionsLoading(false);
+    }
+  }, [notify]);
+
+  const addManagedExclusion = (kind: 'folder' | 'markdown') => {
+    const input = kind === 'folder' ? folderExclusionInput : markdownExclusionInput;
+    const result = addManagedExclusionName(managedExclusions, kind, input);
+    if (result.error) {
+      setManagedExclusionsError(result.error);
+      return;
+    }
+    setManagedExclusions(result.exclusions);
+    setManagedExclusionsError('');
+    setManagedExclusionsResult('');
+    if (kind === 'folder') setFolderExclusionInput('');
+    else setMarkdownExclusionInput('');
+  };
+
+  const removeManagedExclusion = (kind: 'folder' | 'markdown', name: string) => {
+    setManagedExclusions((value) => removeManagedExclusionName(value, kind, name));
+    setManagedExclusionsError('');
+    setManagedExclusionsResult('');
+  };
+
+  const applyManagedDirectoryExclusions = async () => {
+    if (managedExclusionsApplying) return;
+    if (managedDirectoryExclusionsEqual(managedExclusions, savedManagedExclusions)) {
+      setManagedExclusionsResult('目前沒有尚未套用的變更。');
+      return;
+    }
+    const confirmed = await confirmAction({
+      title: '套用直接管理筆記本排除',
+      message: '規則會套用到所有直接管理筆記本。符合規則的筆記與資料夾會立即從 PuffJoplin 隱藏，已開啟的相關分頁會關閉；磁碟上的檔案不會被刪除。',
+      confirmLabel: '套用規則',
+    });
+    if (!confirmed) return;
+    setManagedExclusionsApplying(true);
+    setManagedExclusionsError('');
+    setManagedExclusionsResult('');
+    try {
+      const report = await api.setManagedDirectoryExclusions(managedExclusions);
+      setManagedExclusions(report.exclusions);
+      setSavedManagedExclusions(report.exclusions);
+      const message = managedDirectoryExclusionMessage(report);
+      setManagedExclusionsResult(message);
+      notify(message);
+    } catch (error) {
+      const message = `套用直接管理筆記本排除失敗：${errorMessage(error)}`;
+      setManagedExclusionsError(message);
+      notify(message);
+    } finally {
+      setManagedExclusionsApplying(false);
+    }
+  };
+
   const scheduleSave = useCallback(() => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
@@ -878,6 +1102,32 @@ export default function App() {
     setExportMenuOpen(false);
     setAttachmentMenuOpen(false);
   }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent]);
+
+  const openDashboardNote = useCallback(async (noteID: string) => {
+    setView({ kind: 'all' });
+    await selectNote(noteID);
+  }, [selectNote]);
+
+  const completeDashboardTodo = useCallback(async (noteID: string, todoDue: number) => {
+    try {
+      const completedAt = Date.now();
+      await api.setNoteTodo(noteID, true, todoDue, completedAt);
+      if (currentRef.current.id === noteID) {
+        const updated = {
+          ...currentRef.current,
+          isTodo: true,
+          todoDue,
+          todoCompleted: completedAt,
+        };
+        cacheEditorNote(updated);
+        setCurrent(updated);
+      }
+      await Promise.all([refreshNotes(), refreshDashboard()]);
+      notify('待辦已標記完成');
+    } catch (error) {
+      notify(`完成待辦失敗：${errorMessage(error)}`);
+    }
+  }, [cacheEditorNote, notify, refreshDashboard, refreshNotes]);
 
   const activateEditorTab = useCallback(async (id: string, cacheOutgoing = true) => {
     if (!id || currentRef.current.id === id) return;
@@ -1018,6 +1268,10 @@ export default function App() {
       setBaseFontSize(nextFontSize);
       setFontFamily(nextFontFamily);
       setCustomFontSelected(!FONT_PRESETS.some((preset) => preset.value === nextFontFamily));
+      setEditorPreferences(parseEditorPreferences(
+        settings[EDITOR_PREFERENCES_SETTING] ?? localStorage.getItem(EDITOR_PREFERENCES_KEY),
+        localStorage.getItem(SOURCE_LINE_NUMBERS_KEY),
+      ));
       setPdfFooterCopyright(sanitizePDFSettingText(
         decodePDFSettingText(settings[PDF_FOOTER_TEXT_KEY]),
         PDF_FOOTER_MAX_LENGTH,
@@ -1065,6 +1319,7 @@ export default function App() {
       ));
       setPdfSettingsLoaded(true);
       setAppearanceLoaded(true);
+      setEditorPreferencesLoaded(true);
       setBootstrap(state);
       const page = await api.listNotes({ view: 'all', limit: 300, offset: 0 });
       setNotes(page.items);
@@ -1105,10 +1360,23 @@ export default function App() {
   }, [initialize]);
 
   useEffect(() => {
+    if (view.kind === 'dashboard') void refreshDashboard();
+  }, [refreshDashboard, view.kind]);
+
+  useEffect(() => {
     const cleanups = [
-      onEvent('notes.changed', () => { void refreshNotes(); }),
-      onEvent('notebooks.changed', () => { void refreshTaxonomy(); }),
-      onEvent('tags.changed', () => { void refreshTaxonomy(); }),
+      onEvent('notes.changed', () => {
+        void refreshNotes();
+        if (viewRef.current.kind === 'dashboard') void refreshDashboard();
+      }),
+      onEvent('notebooks.changed', () => {
+        void refreshTaxonomy();
+        if (viewRef.current.kind === 'dashboard') void refreshDashboard();
+      }),
+      onEvent('tags.changed', () => {
+        void refreshTaxonomy();
+        if (viewRef.current.kind === 'dashboard') void refreshDashboard();
+      }),
       onEvent('import.progress', (value) => {
         setImportProgress(value as { progress: number; message: string });
       }),
@@ -1163,6 +1431,7 @@ export default function App() {
     activateEditorTab,
     cacheEditorNote,
     forgetEditorNotes,
+    refreshDashboard,
     refreshNotes,
     refreshTaxonomy,
   ]);
@@ -1344,12 +1613,14 @@ export default function App() {
 
   const deleteNotebook = useCallback(async (notebook: Notebook) => {
     const managed = notebook.storageKind === 'directory';
-    const confirmed = await api.confirm(
-      managed ? '停止管理資料夾' : '刪除筆記本',
-      managed
+    const confirmed = await confirmAction({
+      title: managed ? '停止管理資料夾' : '刪除筆記本',
+      message: managed
         ? `要停止管理「${notebook.storageRoot}」嗎？磁碟上的 Markdown 與圖片不會被刪除。`
         : `確定要刪除「${notebook.title}」及其中的所有筆記嗎？此操作無法復原。`,
-    );
+      confirmLabel: managed ? '停止管理' : '刪除筆記本',
+      tone: managed ? 'default' : 'danger',
+    });
     if (!confirmed) return;
     try {
       await api.deleteNotebook(notebook.id, !managed);
@@ -1359,7 +1630,7 @@ export default function App() {
     } catch (error) {
       notify(`${managed ? '停止管理' : '刪除'}失敗：${errorMessage(error)}`);
     }
-  }, [notify, refreshNotes, refreshTaxonomy]);
+  }, [confirmAction, notify, refreshNotes, refreshTaxonomy]);
 
   const refreshManagedNotebook = useCallback(async (notebook: Notebook) => {
     try {
@@ -1416,10 +1687,12 @@ export default function App() {
       notify('筆記正在儲存，請稍後再移至垃圾桶');
       return;
     }
-    const confirmed = await api.confirm(
-      '移至垃圾桶',
-      `要將「${note.title || '未命名筆記'}」移至垃圾桶嗎？`,
-    );
+    const confirmed = await confirmAction({
+      title: '移至垃圾桶',
+      message: `要將「${note.title || '未命名筆記'}」移至垃圾桶嗎？`,
+      confirmLabel: '移至垃圾桶',
+      tone: 'danger',
+    });
     if (!confirmed) return;
     try {
       await api.trashNote(note.id);
@@ -1440,7 +1713,7 @@ export default function App() {
     } catch (error) {
       notify(`移至垃圾桶失敗：${errorMessage(error)}`);
     }
-  }, [notify, refreshNotes, removeNoteFromWorkspace]);
+  }, [confirmAction, notify, refreshNotes, removeNoteFromWorkspace]);
 
   const restoreNote = useCallback(async (
     note: Pick<NoteSummary, 'id'>,
@@ -1465,10 +1738,12 @@ export default function App() {
     note: Pick<NoteSummary, 'id' | 'title'>,
   ) => {
     if (!note.id) return;
-    const confirmed = await api.confirm(
-      '永久刪除',
-      `「${note.title || '未命名筆記'}」永久刪除後無法復原，確定繼續嗎？`,
-    );
+    const confirmed = await confirmAction({
+      title: '永久刪除',
+      message: `「${note.title || '未命名筆記'}」永久刪除後無法復原，確定繼續嗎？`,
+      confirmLabel: '永久刪除',
+      tone: 'danger',
+    });
     if (!confirmed) return;
     try {
       await api.deleteNotePermanently(note.id);
@@ -1488,7 +1763,7 @@ export default function App() {
     } catch (error) {
       notify(errorMessage(error));
     }
-  }, [notify, refreshNotes, removeNoteFromWorkspace]);
+  }, [confirmAction, notify, refreshNotes, removeNoteFromWorkspace]);
 
   const trashCurrent = useCallback(async () => {
     await trashNote(currentRef.current);
@@ -2014,15 +2289,17 @@ export default function App() {
       })
       .sort((left, right) => left.path.localeCompare(right.path, 'zh-TW', { sensitivity: 'base' }));
   }, [moveNoteDialog, notebookPickerSearch, notebooks]);
-  const activeViewTitle = view.kind === 'trash'
-    ? '垃圾桶'
-    : view.kind === 'todo'
-      ? '待辦'
-    : view.kind === 'tag'
-      ? `#${tags.find((tag) => tag.id === view.id)?.title || ''}`
-      : view.kind === 'notebook'
-        ? activeNotebook?.title || '筆記本'
-        : '全部筆記';
+  const activeViewTitle = view.kind === 'dashboard'
+    ? '儀錶板'
+    : view.kind === 'trash'
+      ? '垃圾桶'
+      : view.kind === 'todo'
+        ? '待辦'
+        : view.kind === 'tag'
+          ? `#${tags.find((tag) => tag.id === view.id)?.title || ''}`
+          : view.kind === 'notebook'
+            ? activeNotebook?.title || '筆記本'
+            : '全部筆記';
   const noteContextMenuHeight = noteContextMenu
     ? Math.min(
       window.innerHeight - 16,
@@ -2144,7 +2421,7 @@ export default function App() {
 
   return (
     <main
-      className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${noteListCollapsed ? 'note-list-collapsed' : ''} ${isWindowMaximized ? 'is-maximized' : ''}`}
+      className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${noteListCollapsed ? 'note-list-collapsed' : ''} ${view.kind === 'dashboard' ? 'is-dashboard' : ''} ${isWindowMaximized ? 'is-maximized' : ''}`}
       style={{
         '--sidebar-resize-width': `${leftWidth}px`,
         '--list-resize-width': `${listWidth}px`,
@@ -2153,7 +2430,11 @@ export default function App() {
       <header className="window-titlebar" onDoubleClick={handleTitlebarDoubleClick}>
         <div className="titlebar-context">
           <span className="titlebar-location">{activeViewTitle}</span>
-          <span className="titlebar-count">{notes.length} 篇</span>
+          <span className="titlebar-count">
+            {view.kind === 'dashboard'
+              ? `${dashboardSnapshot?.counts.activeNotes ?? 0} 篇`
+              : `${notes.length} 篇`}
+          </span>
         </div>
         <GlobalSearch
           query={search}
@@ -2186,6 +2467,7 @@ export default function App() {
             onClick={() => {
               setSettingsMaximized(false);
               setModal({ kind: 'settings' });
+              void loadManagedDirectoryExclusions();
             }}
           >
             <UiIcon name="settings" />
@@ -2229,6 +2511,15 @@ export default function App() {
           ) : (
             <>
               <nav className="nav-section" aria-label="主要導覽">
+                <button
+                  className={`icon-button nav-item ${view.kind === 'dashboard' ? 'active' : ''}`}
+                  type="button"
+                  title="儀錶板"
+                  aria-label="儀錶板"
+                  onClick={() => setView({ kind: 'dashboard' })}
+                >
+                  <UiIcon name="dashboard" />
+                </button>
                 <button
                   className={`icon-button nav-item ${view.kind === 'all' ? 'active' : ''}`}
                   type="button"
@@ -2281,6 +2572,14 @@ export default function App() {
               onClick={() => void createNote()}
             >
               <UiIcon name="plus" />
+            </button>
+            <button
+              className={`icon-button rail-action ${view.kind === 'dashboard' ? 'active' : ''}`}
+              title="儀錶板"
+              aria-label="儀錶板"
+              onClick={() => setView({ kind: 'dashboard' })}
+            >
+              <UiIcon name="dashboard" />
             </button>
             <button
               className={`icon-button rail-action ${view.kind === 'all' ? 'active' : ''}`}
@@ -2470,6 +2769,21 @@ export default function App() {
         )}
       </aside>
 
+      {view.kind === 'dashboard' ? (
+        <Dashboard
+          snapshot={dashboardSnapshot}
+          loading={dashboardLoading}
+          error={dashboardError}
+          cleaningResources={resourceCleanupRunning}
+          onRefresh={() => void refreshDashboard()}
+          onOpenNote={(noteID) => void openDashboardNote(noteID)}
+          onOpenView={setView}
+          onCompleteTodo={(noteID, todoDue) => void completeDashboardTodo(noteID, todoDue)}
+          onCleanupResources={() => void cleanupUnusedResources()}
+          onOpenDataFolder={() => void api.openDataFolder()}
+        />
+      ) : (
+        <>
       {!sidebarCollapsed && (
         <div className="resizer resizer-left" onPointerDown={(event) => beginResize('left', event)} />
       )}
@@ -2793,7 +3107,7 @@ export default function App() {
                         key={tab.id}
                         noteID={note.id}
                         noteTitle={note.title}
-                        initialMode={editorModeForTab(tab)}
+                        initialMode={editorModeForTab(tab, editorPreferences.defaultMode)}
                         initialPreviewMode={tab.previewMode || 'editor'}
                         active={isActive}
                         value={note.body}
@@ -2801,7 +3115,7 @@ export default function App() {
                         storageKind={note.storageKind}
                         resources={note.resources}
                         theme={theme}
-                        showSourceLineNumbers={showSourceLineNumbers}
+                        showSourceLineNumbers={editorPreferences.showSourceLineNumbers}
                         onChange={(body) => {
                           if (currentRef.current.id === tab.id) updateDraft({ body });
                         }}
@@ -2929,6 +3243,8 @@ export default function App() {
           </div>
         )}
       </section>
+        </>
+      )}
 
       {notebookContextMenu && (
         <div
@@ -3517,6 +3833,8 @@ export default function App() {
         </div>
       )}
 
+      {confirmDialog}
+
       {toast && <div className="toast">{toast}</div>}
 
       {importProgress && (
@@ -3678,7 +3996,7 @@ export default function App() {
                 <div className="settings-section-heading">
                   <div>
                     <strong id="appearance-heading">字體外觀</strong>
-                    <span>調整整體介面、字級與原始碼編輯顯示。</span>
+                      <span>調整整體介面字級與字型。</span>
                   </div>
                   <button
                     type="button"
@@ -3686,7 +4004,6 @@ export default function App() {
                       setBaseFontSize(DEFAULT_BASE_FONT_SIZE);
                       setFontFamily(DEFAULT_FONT_FAMILY);
                       setCustomFontSelected(false);
-                      setShowSourceLineNumbers(true);
                     }}
                   >
                     恢復預設
@@ -3750,18 +4067,6 @@ export default function App() {
                       <small>必須是系統已安裝的字型；找不到時會使用 Segoe UI 系統 fallback。</small>
                     </label>
                   )}
-                  <div className="appearance-field source-lines-field">
-                    <span>原始碼行號</span>
-                    <label className="appearance-toggle">
-                      <input
-                        type="checkbox"
-                        checked={showSourceLineNumbers}
-                        onChange={(event) => setShowSourceLineNumbers(event.target.checked)}
-                      />
-                      <span className="appearance-toggle-track" aria-hidden="true" />
-                      <span>在 CodeMirror 原始碼模式顯示行號</span>
-                    </label>
-                  </div>
                 </div>
                 <div className="font-preview" aria-label="字體預覽">
                   <strong className="font-preview-brand">PuffJoplin</strong>
@@ -3770,6 +4075,13 @@ export default function App() {
                   <small>筆記說明與次要資訊使用 0.8× 字級。</small>
                 </div>
               </section>
+              <EditorSettings
+                preferences={editorPreferences}
+                theme={theme}
+                hidden={settingsTab !== 'editor'}
+                onChange={setEditorPreferences}
+                onReset={() => setEditorPreferences(defaultEditorPreferences())}
+              />
               <section
                 id="settings-panel-pdf"
                 className="settings-pdf"
@@ -4111,6 +4423,190 @@ export default function App() {
                       <span>保留純文字格式，便於備份或移轉。</span>
                     </button>
                   </div>
+                </section>
+                <section
+                  className="settings-data-section settings-managed-exclusions"
+                  aria-labelledby="data-managed-exclusions-heading"
+                >
+                  <div className="settings-section-heading">
+                    <div>
+                      <strong id="data-managed-exclusions-heading">直接管理筆記本排除</strong>
+                      <span>依完整名稱隱藏所有直接管理筆記本內的資料夾或 Markdown 檔案。</span>
+                    </div>
+                  </div>
+                  <p className="managed-exclusions-note">
+                    名稱比對區分大小寫；資料夾會排除所有同名的非根目錄子樹。例如
+                    <code>archive</code> 不會排除 <code>Archive</code>，
+                    <code>draft.md</code> 也不會排除 <code>Draft.md</code>。
+                    此功能套用到全部管理根目錄，不會修改或刪除磁碟檔案。
+                  </p>
+                  {managedExclusionsLoading ? (
+                    <p className="managed-exclusions-loading" role="status">正在讀取排除設定…</p>
+                  ) : (
+                    <>
+                      <div className="managed-exclusion-groups">
+                        <div className="managed-exclusion-group">
+                          <label htmlFor="managed-folder-exclusion-input">
+                            <strong>資料夾名稱</strong>
+                            <span>只輸入名稱，例如 <code>archive</code></span>
+                          </label>
+                          <div className="managed-exclusion-input-row">
+                            <input
+                              id="managed-folder-exclusion-input"
+                              type="text"
+                              value={folderExclusionInput}
+                              spellCheck={false}
+                              placeholder="例如：archive"
+                              disabled={managedExclusionsApplying}
+                              onChange={(event) => {
+                                setFolderExclusionInput(event.target.value);
+                                setManagedExclusionsError('');
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'Enter') return;
+                                event.preventDefault();
+                                addManagedExclusion('folder');
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={!folderExclusionInput.trim() || managedExclusionsApplying}
+                              onClick={() => addManagedExclusion('folder')}
+                            >
+                              加入
+                            </button>
+                          </div>
+                          <div className="managed-exclusion-list" aria-label="已排除的資料夾名稱">
+                            {managedExclusions.folderNames.length === 0 ? (
+                              <span className="managed-exclusion-empty">尚未排除資料夾</span>
+                            ) : managedExclusions.folderNames.map((name) => (
+                              <div className="managed-exclusion-item" key={name}>
+                                <span>{name}</span>
+                                <button
+                                  type="button"
+                                  aria-label={`移除資料夾排除 ${name}`}
+                                  title="移除排除"
+                                  disabled={managedExclusionsApplying}
+                                  onClick={() => removeManagedExclusion('folder', name)}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="managed-exclusion-group">
+                          <label htmlFor="managed-markdown-exclusion-input">
+                            <strong>Markdown 檔名</strong>
+                            <span>必須包含 <code>.md</code>，例如 <code>draft.md</code></span>
+                          </label>
+                          <div className="managed-exclusion-input-row">
+                            <input
+                              id="managed-markdown-exclusion-input"
+                              type="text"
+                              value={markdownExclusionInput}
+                              spellCheck={false}
+                              placeholder="例如：draft.md"
+                              disabled={managedExclusionsApplying}
+                              onChange={(event) => {
+                                setMarkdownExclusionInput(event.target.value);
+                                setManagedExclusionsError('');
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'Enter') return;
+                                event.preventDefault();
+                                addManagedExclusion('markdown');
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={!markdownExclusionInput.trim() || managedExclusionsApplying}
+                              onClick={() => addManagedExclusion('markdown')}
+                            >
+                              加入
+                            </button>
+                          </div>
+                          <div className="managed-exclusion-list" aria-label="已排除的 Markdown 檔名">
+                            {managedExclusions.markdownFileNames.length === 0 ? (
+                              <span className="managed-exclusion-empty">尚未排除 Markdown 檔案</span>
+                            ) : managedExclusions.markdownFileNames.map((name) => (
+                              <div className="managed-exclusion-item" key={name}>
+                                <span>{name}</span>
+                                <button
+                                  type="button"
+                                  aria-label={`移除 Markdown 排除 ${name}`}
+                                  title="移除排除"
+                                  disabled={managedExclusionsApplying}
+                                  onClick={() => removeManagedExclusion('markdown', name)}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="managed-exclusions-actions">
+                        <span>
+                          {managedDirectoryExclusionsEqual(managedExclusions, savedManagedExclusions)
+                            ? '目前沒有尚未套用的變更。'
+                            : '清單已變更，套用後才會重新整理索引。'}
+                        </span>
+                        <button
+                          className="primary"
+                          type="button"
+                          disabled={
+                            managedExclusionsApplying ||
+                            managedDirectoryExclusionsEqual(managedExclusions, savedManagedExclusions)
+                          }
+                          onClick={() => void applyManagedDirectoryExclusions()}
+                        >
+                          {managedExclusionsApplying ? '套用中…' : '套用變更'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {managedExclusionsError && (
+                    <p className="managed-exclusions-error" role="alert">
+                      {managedExclusionsError}
+                    </p>
+                  )}
+                  <p
+                    className="managed-exclusions-result"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {managedExclusionsResult}
+                  </p>
+                </section>
+                <section
+                  className="settings-data-section settings-resource-cleanup"
+                  aria-labelledby="data-resource-cleanup-heading"
+                >
+                  <div className="settings-section-heading">
+                    <div>
+                      <strong id="data-resource-cleanup-heading">資源清理</strong>
+                      <span>清理一般筆記不再引用的附件，以及沒有索引的孤兒檔。</span>
+                    </div>
+                  </div>
+                  <div className="settings-grid">
+                    <button
+                      className="resource-cleanup-button"
+                      type="button"
+                      disabled={resourceCleanupRunning || importProgress !== null}
+                      onClick={() => void cleanupUnusedResources()}
+                    >
+                      <strong>{resourceCleanupRunning ? '清理中…' : '資源檔清理'}</strong>
+                      <span>垃圾桶中的引用會保留；直接管理筆記本的外部檔案不會處理。</span>
+                    </button>
+                  </div>
+                  <p
+                    className="resource-cleanup-result"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {resourceCleanupResult}
+                  </p>
                 </section>
               </section>
             </div>

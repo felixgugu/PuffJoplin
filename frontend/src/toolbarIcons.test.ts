@@ -26,11 +26,15 @@ const expectedToolbarNames = [
   'insert-after',
   'upload',
   'table',
+  'format-table',
+  'gallery',
   'undo',
   'redo',
   'page-prev',
   'page-next',
   'find-replace',
+  'fold-all',
+  'unfold-all',
   'wysiwyg-mode',
   'ir-mode',
   'source-mode',
@@ -44,7 +48,7 @@ describe('toolbar icon registry', () => {
   it('maps every visible toolbar action to a Font Awesome SVG', () => {
     expect(Object.keys(TOOLBAR_ICON_FILE_BY_NAME)).toEqual(expectedToolbarNames);
     expect(Object.keys(TOOLBAR_ICON_FILE_BY_NAME)).not.toContain('edit-mode');
-    expect(new Set(Object.values(TOOLBAR_ICON_FILE_BY_NAME)).size).toBe(32);
+    expect(new Set(Object.values(TOOLBAR_ICON_FILE_BY_NAME)).size).toBe(36);
 
     for (const name of expectedToolbarNames as ToolbarIconName[]) {
       const svg = toolbarIcon(name);

@@ -99,4 +99,18 @@ describe('note list queries', () => {
       sortDirection: 'desc',
     })).toMatchObject({ view: 'all', notebookId: '' });
   });
+
+  it('keeps background note refresh queries valid on the dashboard', () => {
+    expect(buildNoteListQuery({
+      view: { kind: 'dashboard' },
+      search: '',
+      searchScope: 'all',
+      searchField: 'all',
+      searchCaseSensitive: false,
+      searchWholeWord: false,
+      searchNotebookID: '',
+      sortBy: 'updated',
+      sortDirection: 'desc',
+    })).toMatchObject({ view: 'all' });
+  });
 });

@@ -13,11 +13,12 @@ import (
 )
 
 type managedRootWatcher struct {
-	rootID   string
-	rootPath string
-	watcher  *fsnotify.Watcher
-	stop     chan struct{}
-	done     chan struct{}
+	rootID     string
+	rootPath   string
+	exclusions ManagedDirectoryExclusions
+	watcher    *fsnotify.Watcher
+	stop       chan struct{}
+	done       chan struct{}
 }
 
 func (a *App) startManagedWatchers() {
@@ -37,6 +38,11 @@ func (a *App) startManagedWatchers() {
 }
 
 func (a *App) startManagedWatcher(rootID string, rootPath string) {
+	exclusions, err := a.store.GetManagedDirectoryExclusions(a.ctx)
+	if err != nil {
+		a.logger.Printf("read exclusions for managed directory %s: %v", rootPath, err)
+		return
+	}
 	a.managedMu.Lock()
 	if _, exists := a.managedWatchers[rootID]; exists {
 		a.managedMu.Unlock()
@@ -48,14 +54,14 @@ func (a *App) startManagedWatcher(rootID string, rootPath string) {
 		a.logger.Printf("create watcher for %s: %v", rootPath, err)
 		return
 	}
-	if err := addManagedWatchTree(watcher, rootPath); err != nil {
+	if err := addManagedWatchTree(watcher, rootPath, exclusions); err != nil {
 		_ = watcher.Close()
 		a.managedMu.Unlock()
 		a.logger.Printf("watch managed directory %s: %v", rootPath, err)
 		return
 	}
 	item := &managedRootWatcher{
-		rootID: rootID, rootPath: rootPath, watcher: watcher,
+		rootID: rootID, rootPath: rootPath, exclusions: exclusions, watcher: watcher,
 		stop: make(chan struct{}), done: make(chan struct{}),
 	}
 	a.managedWatchers[rootID] = item
@@ -63,7 +69,11 @@ func (a *App) startManagedWatcher(rootID string, rootPath string) {
 	go a.runManagedWatcher(item)
 }
 
-func addManagedWatchTree(watcher *fsnotify.Watcher, root string) error {
+func addManagedWatchTree(
+	watcher *fsnotify.Watcher,
+	root string,
+	exclusions ManagedDirectoryExclusions,
+) error {
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			if path == root {
@@ -79,6 +89,9 @@ func addManagedWatchTree(watcher *fsnotify.Watcher, root string) error {
 		}
 		if !entry.IsDir() {
 			return nil
+		}
+		if managedPathExcluded(root, path, true, exclusions) {
+			return filepath.SkipDir
 		}
 		if path != root && strings.EqualFold(entry.Name(), managedImagesDir) {
 			return filepath.SkipDir
@@ -116,10 +129,14 @@ func (a *App) runManagedWatcher(item *managedRootWatcher) {
 			if !ok {
 				return
 			}
+			if managedPathExcluded(item.rootPath, event.Name, true, item.exclusions) ||
+				managedPathExcluded(item.rootPath, event.Name, false, item.exclusions) {
+				continue
+			}
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() &&
 					!strings.EqualFold(filepath.Base(event.Name), managedImagesDir) {
-					_ = addManagedWatchTree(item.watcher, event.Name)
+					_ = addManagedWatchTree(item.watcher, event.Name, item.exclusions)
 				}
 			}
 			if !managedWatchEventRelevant(event) {

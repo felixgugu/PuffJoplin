@@ -76,6 +76,15 @@ export interface Resource {
   updatedAt: number;
 }
 
+export interface ResourceCleanupReport {
+  removedCount: number;
+  removedIndexed: number;
+  removedOrphans: number;
+  freedBytes: number;
+  failedCount: number;
+  skippedRecent: number;
+}
+
 export interface Note {
   id: string;
   notebookId: string;
@@ -180,6 +189,22 @@ export interface ManagedDirectoryReport {
   warnings: ImportWarning[];
 }
 
+export interface ManagedDirectoryExclusions {
+  folderNames: string[];
+  markdownFileNames: string[];
+}
+
+export interface ManagedDirectoryExclusionReport {
+  exclusions: ManagedDirectoryExclusions;
+  rootCount: number;
+  hiddenNotebooks: number;
+  hiddenNotes: number;
+  restoredNotebooks: number;
+  restoredNotes: number;
+  hiddenNoteIds: string[];
+  warnings: ImportWarning[];
+}
+
 export interface NotebookDocxExport {
   path: string;
   defaultFilename: string;
@@ -192,7 +217,79 @@ export interface NoteDocxExport {
   markdown: string;
 }
 
+export interface DashboardCounts {
+  activeNotes: number;
+  trashNotes: number;
+  notebooks: number;
+  tags: number;
+  openTodos: number;
+  completedTodos: number;
+}
+
+export interface DashboardTodo {
+  id: string;
+  title: string;
+  notebookTitle: string;
+  todoDue: number;
+}
+
+export interface DashboardRecentNote {
+  id: string;
+  title: string;
+  notebookTitle: string;
+  updatedAt: number;
+}
+
+export interface DashboardActivityDay {
+  date: string;
+  created: number;
+  updated: number;
+}
+
+export interface DashboardNotebookStat {
+  id: string;
+  title: string;
+  noteCount: number;
+  openTodoCount: number;
+  storageKind: 'database' | 'directory';
+}
+
+export interface DashboardMedia {
+  imageReferences: number;
+  mermaidDiagrams: number;
+  attachmentCount: number;
+  attachmentBytes: number;
+  unusedResourceCount: number;
+  unusedResourceBytes: number;
+  missingResourceCount: number;
+}
+
+export interface DashboardManagedRoot {
+  notebookId: string;
+  title: string;
+  path: string;
+  available: boolean;
+}
+
+export interface DashboardHealth {
+  dataDir: string;
+  managedRoots: DashboardManagedRoot[];
+}
+
+export interface DashboardSnapshot {
+  counts: DashboardCounts;
+  todos: DashboardTodo[];
+  recent: DashboardRecentNote[];
+  activity: DashboardActivityDay[];
+  notebooks: DashboardNotebookStat[];
+  tags: Tag[];
+  media: DashboardMedia;
+  health: DashboardHealth;
+  generatedAt: number;
+}
+
 export type View =
+  | { kind: 'dashboard' }
   | { kind: 'all' }
   | { kind: 'todo' }
   | { kind: 'trash' }

@@ -35,7 +35,10 @@
 | 統一稱呼 | 程式對應 | 說明 |
 |---|---|---|
 | 側欄頂列 | `.sidebar-head` | 左側導覽最上方的單列控制，不使用品牌標誌或名稱。 |
-| 主要導覽 | `.nav-section` | 單行圖示列，包含「全部筆記」、「待辦」與「垃圾桶」。 |
+| 主要導覽 | `.nav-section` | 單行圖示列，包含「儀錶板」、「全部筆記」、「待辦」與「垃圾桶」。 |
+| 儀錶板 | `.dashboard-panel` | 全寬工作台，彙整今日待辦、最近筆記、活動、筆記本、標籤、媒體與資料健康。 |
+| 今日焦點 | `.dashboard-focus` | 依逾期、今天到期、未來七天與稍後到期分組顯示未完成待辦。 |
+| 資料健康 | `.dashboard-health` | 顯示可回收資源、遺失附件、資料目錄與直接管理根目錄狀態。 |
 | 待辦檢視 | 主要導覽的「待辦」按鈕 | 跨筆記本顯示待辦筆記，不改變筆記所屬筆記本。 |
 | 導覽分頁列 | `.sidebar-tabs` | 在「筆記本」與「標籤」分頁之間切換。 |
 | 筆記本樹 | `.notebook-tab-content`、`.notebook-row` | 階層式筆記本與展開／收合控制；文字使用主要字級 `1rem`。 |
@@ -93,11 +96,18 @@
 | 原始碼行號 | `.cm-gutters`、`.cm-lineNumbers` | CodeMirror 原始碼模式左側的行號；可在設定視窗的「原始碼行號」開關切換。 |
 | 原始碼折疊控制 | `.cm-foldGutter`、`.puff-fold-marker` | 在可折疊的 Markdown 標題、清單、引用、程式碼與表格左側顯示收合／展開按鈕。 |
 | 原始碼折疊佔位符 | `.cm-foldPlaceholder` | 內容折疊後顯示的膠囊狀省略標記，點擊可展開。 |
-| 原始碼浮動預覽 | `.source-line-preview` | 原始碼模式點擊本機圖片行或 Mermaid 開頭 fence 後顯示的圖片／流程圖檢視器；支援拖曳、縮放、平移、最大化與關閉。 |
+| 原始碼浮動預覽 | `.source-line-preview` | 從工具列相簿或原始碼圖稿開啟的媒體 Dialog；支援拖曳、八向調整大小、縮放、平移、最大化、定位內文與刪除引用。 |
+| 原始碼媒體畫廊 | `.source-line-preview-gallery` | Dialog 底部的水平縮圖列，合併目前筆記的圖片與 Mermaid，支援循環切換上一張／下一張；透明 Mermaid 使用白色顯示背景。 |
+| 原始碼媒體縮圖 | `.source-line-preview-thumbnail` | 單一圖片或 Mermaid 的畫廊縮圖與選取狀態。 |
+| 原始碼媒體調整把手 | `.source-line-preview-resize` | Dialog 邊框與角落的八向拖曳控制。 |
 | 編輯工具列 | `.vditor-toolbar` | 標題、粗體、清單、附件、復原、模式切換等工具；圖示由 Font Awesome registry 提供。 |
 | 工具列 SVG | `.puff-toolbar-svg` | 由 `toolbarIcons.ts` 載入並內嵌的 Font Awesome SVG，使用 `currentColor` 跟隨佈景。 |
 | 上一頁按鈕 | `.vditor-toolbar` 的 `page-prev` | 將目前筆記內容向上捲動約一個可視頁面；快捷鍵為 `Alt+←`。 |
 | 下一頁按鈕 | `.vditor-toolbar` 的 `page-next` | 將目前筆記內容向下捲動約一個可視頁面；快捷鍵為 `Alt+→`。 |
+| 原始碼全部收合按鈕 | `.vditor-toolbar` 的 `fold-all` | 在原始碼模式使用 CodeMirror 遞迴收合所有可折疊區段，包含巢狀節點；其他模式停用，快捷鍵為 `Ctrl+Alt+[`。 |
+| 原始碼全部展開按鈕 | `.vditor-toolbar` 的 `unfold-all` | 在原始碼模式使用 CodeMirror 展開所有已折疊區段；其他模式停用，快捷鍵為 `Ctrl+Alt+]`。 |
+| 格式化表格按鈕 | `.vditor-toolbar` 的 `format-table` | 在原始碼模式格式化游標所在的 Markdown 表格；有選取內容時批次格式化範圍內所有表格，其他模式停用。 |
+| 相簿按鈕 | `.vditor-toolbar` 的 `gallery` | 在任何編輯模式開啟目前筆記的圖片與 Mermaid 畫廊；沒有媒體時顯示提示。 |
 | 文字顏色按鈕 | `.vditor-toolbar` 的 `text-color` | 開啟 16 色文字顏色面板。 |
 | 文字顏色面板 | `.editor-text-color-palette` | 16 色色盤與「恢復預設色」操作。 |
 | 顏色色票 | `.text-color-swatch` | 單一常用文字顏色按鈕。 |
@@ -140,24 +150,34 @@
 | 筆記附加資訊 Dialog | `.note-info-dialog` | 編輯目前筆記的 12 個 PDF 封面參數名稱與值。 |
 | 筆記本名稱對話框 | `.notebook-name-dialog` | 新增最上層／子筆記本與重新命名筆記本的統一輸入視窗。 |
 | 筆記本選擇器 | `.note-move-dialog` | 搜尋完整目錄路徑並移動筆記。 |
+| 共用確認對話框 | `.confirm-dialog` | 應用程式內統一的確認視窗，用於刪除、移至垃圾桶、停止管理與資源檔清理等不可逆或需確認操作。 |
 | 通知提示 | `.toast` | 操作成功或失敗的短暫提示。 |
 | 匯入進度浮層 | `.progress-overlay` | 匯入期間的進度顯示。 |
 | 第一次啟動匯入視窗 | `.onboarding-card` | 偵測 Joplin profile 後顯示的匯入提示。 |
 | 設定視窗 | `.modal-card.settings-modal` | 加寬的分頁式設定視窗，頁首、分類列與版本底列固定，內容區獨立捲動。 |
-| 設定分頁列 | `.settings-tabs` | 在「外觀」、「PDF」、「快捷鍵」與「資料」四個設定分頁間切換。 |
+| 設定分頁列 | `.settings-tabs` | 在「外觀」、「編輯」、「PDF」、「快捷鍵」與「資料」五個設定分頁間切換。 |
 | 設定內容區 | `.settings-content` | 顯示目前設定分頁的可捲動內容。 |
 | 設定最大化按鈕 | `.settings-window-actions` | 設定視窗右上角的最大化／還原與關閉控制；最大化只放大設定 Dialog。 |
+| 編輯分頁 | `.settings-editor` | 管理預設編輯模式、原始碼行號與亮色／暗色 CodeMirror 原始碼外觀。 |
+| 原始碼外觀自訂區 | `.source-appearance-controls` | 編輯目前選取佈景的基礎顏色、Markdown 語法色、字重與排版參數。 |
+| 原始碼配色預覽 | `.source-appearance-preview` | 以範例 Markdown 即時顯示目前原始碼前景、背景與語法色。 |
+| 原始碼程式碼區塊背景 | `.puff-source-code-block` | CodeMirror fenced code 與縮排程式碼區塊的獨立行背景，由「程式碼區塊背景」色票控制。 |
+| 原始碼行內程式碼 | `.puff-source-inline-code` | CodeMirror Markdown 行內程式碼範圍，獨立使用「行內程式碼文字」與「行內程式碼背景」色票。 |
 | PDF 匯出設定 | `.settings-pdf` | 設定 PDF 封面、裝飾總開關、每頁頁尾版權文字、浮水印文字與可調圖樣參數。 |
 | 封面設計器 | `.pdf-cover-designer` | PDF 設定頁中的封面啟用、A4 預覽、變數清單與屬性面板。 |
+| 封面預覽捲動區 | `.pdf-cover-canvas-shell` | 固定於設定視窗可視高度的 A4 封面滾動容器，使用獨立垂直捲軸查看完整頁面。 |
 | A4 封面畫布 | `.pdf-cover-canvas` | 可拖曳封面變數並顯示目前筆記資料的預覽畫布。 |
 | 封面邊距參考框 | `.pdf-cover-margin-guide` | 顯示上 25.4 mm、左右各 19 mm、下 12.5 mm 的虛線頁面邊距；只供設計對齊，不輸出 PDF。 |
 | 封面多選工具列 | `.pdf-cover-bulk-actions` | 顯示已選數量、文字間距與左／中對齊批次操作。 |
 | 封面變數啟用鈕 | `.pdf-cover-visibility-toggle` | 控制單一封面變數是否輸出；眼睛圖示表示目前狀態。 |
 | PDF 裝飾開關 | `.pdf-settings-toggles` | 分別控制版權宣告頁尾與浮水印，預設為頁尾開啟、浮水印關閉。 |
 | PDF 浮水印 | `.pdf-watermark-layer` | 使用設定文字與匯出日期產生透明 SVG pattern；尺寸、字級、透明度與旋轉角度均可調。 |
-| 原始碼行號開關 | `.source-lines-field`、`.appearance-toggle` | 設定頁中控制 CodeMirror 原始碼行號的 Fluent 切換開關。 |
+| 原始碼行號開關 | `.source-lines-field`、`.appearance-toggle` | 編輯分頁中控制 CodeMirror 原始碼行號與折疊控制的 Fluent 切換開關。 |
 | 鍵盤快捷鍵清單 | `.settings-shortcuts` | 設定頁中的唯讀快捷鍵參考，依應用程式、搜尋、格式化、編輯器與原始碼操作分組。 |
 | 資料與儲存分頁 | `.settings-data` | 將匯入功能與本機儲存／Markdown 匯出分成獨立功能區。 |
+| 資源清理區塊 | `.settings-resource-cleanup` | 清理一般筆記未引用的資料庫資源與本機孤兒檔，不處理直接管理筆記本的外部檔案。 |
+| 資源檔清理按鈕 | `.resource-cleanup-button` | 執行未引用資源清理，並在垃圾桶引用保留後顯示清理數量與釋放空間。 |
+| 資源清理結果 | `.resource-cleanup-result` | 設定頁中持續顯示最近一次資源清理結果、近期保留數與失敗數。 |
 | 匯入結果視窗 | `.modal-card.import-report` | 顯示匯入統計與警告。 |
 | 錯誤畫面 | `.fatal-screen`、`.fatal-card` | 無法啟動或前端發生未處理錯誤時的復原畫面。 |
 
