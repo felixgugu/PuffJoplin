@@ -176,6 +176,7 @@ describe('stylesheet structure', () => {
     expect(declarationsBySelector.get('.source-color-grid')?.get('grid-template-columns'))
       .toBe('repeat(2, minmax(0, 1fr))');
     expect(componentSource).toContain("color: 'var(--source-foreground)'");
+    expect(componentSource).toContain("fontFamily: 'var(--source-font-family)'");
     expect(componentSource).toContain("fontSize: 'var(--source-font-size)'");
     expect(componentSource).toContain("borderLeftWidth: 'var(--source-caret-width)'");
   });
@@ -469,6 +470,20 @@ describe('stylesheet structure', () => {
     expect(toolbarBackground).toBe('transparent');
     expect(toolbarBorder).toBe('0');
     expect(railBackground).toBe('transparent');
+  });
+
+  it('keeps managed exclusion apply text readable on the accent surface', () => {
+    let applyText = '';
+    root.walkRules((rule) => {
+      if (rule.selector.replace(/\s+/g, ' ')
+        !== '.managed-exclusions-actions button.primary:not(:disabled)') return;
+      const color = rule.nodes.find(
+        (node) => node.type === 'decl' && node.prop === 'color',
+      );
+      if (color?.type === 'decl') applyText = color.value;
+    });
+
+    expect(applyText).toBe('var(--accent-text)');
   });
 
   it('keeps cascade layer sections in the documented order', () => {

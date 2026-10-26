@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { api, onEvent } from './api';
 import {
   parsePDFCoverDesign,
@@ -19,6 +20,11 @@ import Dashboard from './Dashboard';
 import { convertNotebookMarkdownToDocx } from './docxExport';
 import EditorTabBar from './EditorTabBar';
 import EditorSettings from './EditorSettings';
+import FluentSelect from './FluentSelect';
+import {
+  placeSidebarActionMenu,
+  type FloatingMenuPosition,
+} from './floatingMenu';
 import FreeNumberInput from './FreeNumberInput';
 import {
   activateEditorTab as activateEditorTabState,
@@ -44,7 +50,8 @@ import {
   serializeEditorPreferences,
   SOURCE_APPEARANCE_VARIABLE_NAMES,
   SOURCE_LINE_NUMBERS_KEY,
-  sourceEditorCSSVariables,
+  sourceColorCSSVariables,
+  sourceTypographyCSSVariables,
 } from './editorPreferences';
 import GlobalSearch from './GlobalSearch';
 import { KEYBOARD_SHORTCUT_GROUPS } from './keyboardShortcuts';
@@ -108,8 +115,12 @@ import UiIcon from './UiIcon';
 import VditorEditor, { type VditorEditorHandle } from './VditorEditor';
 import Vditor from 'vditor';
 import {
+  MAX_NOTE_TAG_PANEL_RATIO,
+  MIN_NOTE_TAG_PANEL_RATIO,
   NOTE_LIST_COLLAPSED_KEY,
   NOTE_LIST_SUMMARY_KEY,
+  NOTE_TAG_PANEL_OPEN_KEY,
+  NOTE_TAG_PANEL_RATIO_KEY,
   NOTE_SORT_BY_KEY,
   NOTE_SORT_DIRECTION_KEY,
   TODO_SORT_BY_KEY,
@@ -120,6 +131,8 @@ import {
   parseSearchField,
   parseNoteSortBy,
   parseNoteSortDirection,
+  parseNoteTagPanelOpen,
+  parseNoteTagPanelRatio,
   parseSearchToggle,
   parseShowNoteSummary,
   parseSearchScope,
@@ -131,6 +144,7 @@ import {
   SEARCH_WHOLE_WORD_KEY,
   shouldExpandNoteList,
 } from './noteListPreferences';
+import { collectNoteTags, filterNotesByTag } from './noteTagPanel';
 import {
   buildNotebookRows,
   COLLAPSED_NOTEBOOKS_KEY,
@@ -371,10 +385,18 @@ export default function App() {
   const [showNoteSummary, setShowNoteSummary] = useState(
     () => parseShowNoteSummary(localStorage.getItem(NOTE_LIST_SUMMARY_KEY)),
   );
+  const [noteTagPanelOpen, setNoteTagPanelOpen] = useState(
+    () => parseNoteTagPanelOpen(localStorage.getItem(NOTE_TAG_PANEL_OPEN_KEY)),
+  );
+  const [noteTagPanelRatio, setNoteTagPanelRatio] = useState(
+    () => parseNoteTagPanelRatio(localStorage.getItem(NOTE_TAG_PANEL_RATIO_KEY)),
+  );
+  const [selectedNoteTag, setSelectedNoteTag] = useState('');
   const [editorPreferences, setEditorPreferences] = useState(
     () => parseEditorPreferences(
       localStorage.getItem(EDITOR_PREFERENCES_KEY),
       localStorage.getItem(SOURCE_LINE_NUMBERS_KEY),
+      window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
     ),
   );
   const [editorPreferencesLoaded, setEditorPreferencesLoaded] = useState(false);
@@ -417,6 +439,8 @@ export default function App() {
   } | null>(null);
   const [notebookDialog, setNotebookDialog] = useState<NotebookDialogState | null>(null);
   const [newNotebookMenuOpen, setNewNotebookMenuOpen] = useState(false);
+  const [newNotebookMenuPosition, setNewNotebookMenuPosition] =
+    useState<FloatingMenuPosition | null>(null);
   const [notebookPickerSearch, setNotebookPickerSearch] = useState('');
   const [draggingNoteID, setDraggingNoteID] = useState('');
   const [dropNotebookID, setDropNotebookID] = useState('');
@@ -440,6 +464,8 @@ export default function App() {
   const editorRef = useRef<VditorEditorHandle | null>(null);
   const notebookDialogInputRef = useRef<HTMLInputElement | null>(null);
   const newNotebookMenuRef = useRef<HTMLDivElement | null>(null);
+  const newNotebookMenuPopoverRef = useRef<HTMLDivElement | null>(null);
+  const noteListContentRef = useRef<HTMLDivElement | null>(null);
   const editorTabsRef = useRef(editorTabs);
   const viewRef = useRef(view);
   const currentRef = useRef(current);
@@ -460,6 +486,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
+    if (sidebarCollapsed) setNewNotebookMenuOpen(false);
   }, [sidebarCollapsed]);
 
   useEffect(() => {
@@ -469,6 +496,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_TAB_KEY, sidebarTab);
     setNotebookContextMenu(null);
+    setNewNotebookMenuOpen(false);
   }, [sidebarTab]);
 
   useEffect(() => {
@@ -491,13 +519,40 @@ export default function App() {
 
   useEffect(() => {
     if (!newNotebookMenuOpen) return undefined;
+    const trigger = newNotebookMenuRef.current;
+    const popover = newNotebookMenuPopoverRef.current;
     const close = (event: PointerEvent) => {
-      if (!newNotebookMenuRef.current?.contains(event.target as Node)) {
-        setNewNotebookMenuOpen(false);
-      }
+      const target = event.target as Node;
+      if (trigger?.contains(target) || popover?.contains(target)) return;
+      setNewNotebookMenuOpen(false);
     };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setNewNotebookMenuOpen(false);
+      window.requestAnimationFrame(() => trigger?.querySelector('button')?.focus());
+    };
+    const closeOnViewportChange = () => setNewNotebookMenuOpen(false);
     window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
+    window.addEventListener('blur', closeOnViewportChange);
+    window.addEventListener('resize', closeOnViewportChange);
+    window.addEventListener('keydown', closeOnEscape);
+    document.addEventListener('scroll', closeOnViewportChange, true);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('blur', closeOnViewportChange);
+      window.removeEventListener('resize', closeOnViewportChange);
+      window.removeEventListener('keydown', closeOnEscape);
+      document.removeEventListener('scroll', closeOnViewportChange, true);
+    };
+  }, [newNotebookMenuOpen]);
+
+  useEffect(() => {
+    if (!newNotebookMenuOpen) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      newNotebookMenuPopoverRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [newNotebookMenuOpen]);
 
   useEffect(() => {
@@ -601,13 +656,32 @@ export default function App() {
   }, [showNoteSummary]);
 
   useEffect(() => {
+    localStorage.setItem(NOTE_TAG_PANEL_OPEN_KEY, String(noteTagPanelOpen));
+  }, [noteTagPanelOpen]);
+
+  useEffect(() => {
+    localStorage.setItem(NOTE_TAG_PANEL_RATIO_KEY, String(noteTagPanelRatio));
+  }, [noteTagPanelRatio]);
+
+  useEffect(() => {
+    if (!noteTagPanelOpen) setSelectedNoteTag('');
+  }, [noteTagPanelOpen]);
+
+  useEffect(() => {
     const root = document.documentElement;
     for (const variable of SOURCE_APPEARANCE_VARIABLE_NAMES) {
       root.style.removeProperty(variable);
     }
+    for (
+      const [variable, value] of Object.entries(
+        sourceTypographyCSSVariables(editorPreferences.sourceTypography),
+      )
+    ) {
+      root.style.setProperty(variable, value);
+    }
     if (editorPreferences.customSourceAppearance) {
       const profile = editorPreferences.sourceAppearance[theme];
-      for (const [variable, value] of Object.entries(sourceEditorCSSVariables(profile))) {
+      for (const [variable, value] of Object.entries(sourceColorCSSVariables(profile))) {
         root.style.setProperty(variable, value);
       }
     }
@@ -857,6 +931,25 @@ export default function App() {
     searchWholeWord ? 'word' : 'substring',
     view.kind === 'todo' ? todoStatus : '',
   ].join(':');
+
+  const noteTags = useMemo(() => collectNoteTags(notes), [notes]);
+  const visibleNotes = useMemo(
+    () => filterNotesByTag(notes, selectedNoteTag),
+    [notes, selectedNoteTag],
+  );
+
+  useEffect(() => {
+    setSelectedNoteTag('');
+  }, [listFilterKey]);
+
+  useEffect(() => {
+    if (
+      selectedNoteTag &&
+      !noteTags.some((tag) => tag.title === selectedNoteTag)
+    ) {
+      setSelectedNoteTag('');
+    }
+  }, [noteTags, selectedNoteTag]);
 
   const refreshNotes = useCallback(async () => {
     const requestID = ++listRequestRef.current;
@@ -1271,6 +1364,7 @@ export default function App() {
       setEditorPreferences(parseEditorPreferences(
         settings[EDITOR_PREFERENCES_SETTING] ?? localStorage.getItem(EDITOR_PREFERENCES_KEY),
         localStorage.getItem(SOURCE_LINE_NUMBERS_KEY),
+        storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : theme,
       ));
       setPdfFooterCopyright(sanitizePDFSettingText(
         decodePDFSettingText(settings[PDF_FOOTER_TEXT_KEY]),
@@ -1510,6 +1604,27 @@ export default function App() {
     saveCurrent,
     view.kind,
   ]);
+
+  const toggleNewNotebookMenu = () => {
+    if (newNotebookMenuOpen) {
+      setNewNotebookMenuOpen(false);
+      return;
+    }
+    const trigger = newNotebookMenuRef.current?.querySelector<HTMLButtonElement>('button');
+    const sidebar = trigger?.closest<HTMLElement>('.sidebar');
+    if (!trigger || !sidebar) return;
+    const triggerRect = trigger.getBoundingClientRect();
+    const sidebarRect = sidebar.getBoundingClientRect();
+    setNewNotebookMenuPosition(placeSidebarActionMenu({
+      triggerRight: triggerRect.right,
+      triggerBottom: triggerRect.bottom,
+      sidebarLeft: sidebarRect.left,
+      sidebarRight: sidebarRect.right,
+      preferredWidth: 224,
+      viewportWidth: window.innerWidth,
+    }));
+    setNewNotebookMenuOpen(true);
+  };
 
   const openCreateNotebookDialog = useCallback((parentID = '') => {
     setNewNotebookMenuOpen(false);
@@ -2395,6 +2510,48 @@ export default function App() {
     window.addEventListener('pointerup', up);
   };
 
+  const beginNoteTagPanelResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const content = noteListContentRef.current;
+    if (!content) return;
+    const rect = content.getBoundingClientRect();
+    const updateRatio = (clientY: number) => {
+      const minimumTop = Math.min(0.45, 120 / rect.height);
+      const minimumBottom = Math.min(0.45, 96 / rect.height);
+      const lower = Math.max(MIN_NOTE_TAG_PANEL_RATIO, minimumBottom);
+      const upper = Math.max(
+        lower,
+        Math.min(MAX_NOTE_TAG_PANEL_RATIO, 1 - minimumTop),
+      );
+      const next = Math.max(lower, Math.min(upper, (rect.bottom - clientY) / rect.height));
+      setNoteTagPanelRatio(next);
+    };
+    updateRatio(event.clientY);
+    const move = (moveEvent: PointerEvent) => updateRatio(moveEvent.clientY);
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  const adjustNoteTagPanelRatio = (delta: number) => {
+    setNoteTagPanelRatio((value) => Math.max(
+      MIN_NOTE_TAG_PANEL_RATIO,
+      Math.min(MAX_NOTE_TAG_PANEL_RATIO, value + delta),
+    ));
+  };
+
+  const toggleNoteTagPanel = () => {
+    if (noteTagPanelOpen) setSelectedNoteTag('');
+    setNoteTagPanelOpen(!noteTagPanelOpen);
+  };
+
+  const toggleNoteTag = (title: string) => {
+    setSelectedNoteTag((selected) => selected === title ? '' : title);
+  };
+
   if (fatalError) {
     return (
       <main className="fatal-screen">
@@ -2642,20 +2799,32 @@ export default function App() {
               </div>
               <div className="sidebar-tab-actions">
                 {sidebarTab === 'notebooks' && (
-                  <div ref={newNotebookMenuRef} className="new-notebook-picker">
-                    <button
-                      className={`icon-button sidebar-tab-action ${newNotebookMenuOpen ? 'active' : ''}`}
-                      type="button"
-                      title="新增或開啟筆記本"
-                      aria-label="新增或開啟筆記本"
-                      aria-haspopup="menu"
-                      aria-expanded={newNotebookMenuOpen}
-                      onClick={() => setNewNotebookMenuOpen((value) => !value)}
-                    >
-                      <UiIcon name="plus" />
-                    </button>
-                    {newNotebookMenuOpen && (
-                      <div className="new-notebook-menu" role="menu" aria-label="新增或開啟筆記本">
+                  <>
+                    <div ref={newNotebookMenuRef} className="new-notebook-picker">
+                      <button
+                        className={`icon-button sidebar-tab-action ${newNotebookMenuOpen ? 'active' : ''}`}
+                        type="button"
+                        title="新增或開啟筆記本"
+                        aria-label="新增或開啟筆記本"
+                        aria-haspopup="menu"
+                        aria-expanded={newNotebookMenuOpen}
+                        onClick={toggleNewNotebookMenu}
+                      >
+                        <UiIcon name="plus" />
+                      </button>
+                    </div>
+                    {newNotebookMenuOpen && newNotebookMenuPosition && createPortal(
+                      <div
+                        ref={newNotebookMenuPopoverRef}
+                        className="new-notebook-menu"
+                        role="menu"
+                        aria-label="新增或開啟筆記本"
+                        style={{
+                          left: newNotebookMenuPosition.left,
+                          top: newNotebookMenuPosition.top,
+                          width: newNotebookMenuPosition.width,
+                        }}
+                      >
                         <button
                           type="button"
                           role="menuitem"
@@ -2672,9 +2841,10 @@ export default function App() {
                           <UiIcon name="folder-managed" />
                           <span>開啟 Markdown 目錄…</span>
                         </button>
-                      </div>
+                      </div>,
+                      document.body,
                     )}
-                  </div>
+                  </>
                 )}
                 {sidebarTab === 'notebooks' && (
                   <button
@@ -2792,17 +2962,20 @@ export default function App() {
         <section className="note-list-panel">
             <header className="note-list-header">
               <div className="note-list-sort">
-                <select
+                <FluentSelect<NoteSortBy>
                   className="note-sort-select"
                   value={activeSortBy}
-                  aria-label={view.kind === 'todo' ? '待辦排序方式' : '筆記排序方式'}
-                  onChange={(event) => updateActiveSortBy(parseNoteSortBy(event.target.value))}
-                >
-                  <option value="title">字母</option>
-                  <option value="created">新增日期</option>
-                  <option value="updated">修改日期</option>
-                  {view.kind === 'todo' && <option value="due">到期日</option>}
-                </select>
+                  ariaLabel={view.kind === 'todo' ? '待辦排序方式' : '筆記排序方式'}
+                  options={[
+                    { value: 'title', label: '字母' },
+                    { value: 'created', label: '新增日期' },
+                    { value: 'updated', label: '修改日期' },
+                    ...(view.kind === 'todo'
+                      ? [{ value: 'due' as const, label: '到期日' }]
+                      : []),
+                  ]}
+                  onChange={updateActiveSortBy}
+                />
                 <button
                   className="note-sort-direction"
                   type="button"
@@ -2813,6 +2986,16 @@ export default function App() {
                 </button>
               </div>
               <div className="note-list-actions">
+                <button
+                  className={`icon-button note-tag-panel-toggle ${noteTagPanelOpen ? 'active' : ''}`}
+                  type="button"
+                  aria-label={noteTagPanelOpen ? '收合標籤面板' : '展開標籤面板'}
+                  aria-pressed={noteTagPanelOpen}
+                  title={noteTagPanelOpen ? '收合標籤面板' : '展開標籤面板'}
+                  onClick={toggleNoteTagPanel}
+                >
+                  <UiIcon name="tag" />
+                </button>
                 <button
                   className={`icon-button toggle-note-summary-button ${showNoteSummary ? 'active' : ''}`}
                   type="button"
@@ -2868,15 +3051,35 @@ export default function App() {
                 ))}
               </div>
             )}
-            <div className={`note-list ${showNoteSummary ? '' : 'is-compact'}`} aria-label="筆記清單">
-              {notes.length === 0 && (
+            <div
+              ref={noteListContentRef}
+              className={`note-list-content ${noteTagPanelOpen ? 'has-tag-panel' : ''}`}
+            >
+            <div
+              className={`note-list ${showNoteSummary ? '' : 'is-compact'}`}
+              aria-label="筆記清單"
+              style={noteTagPanelOpen
+                ? { flexBasis: `${(1 - noteTagPanelRatio) * 100}%` }
+                : undefined}
+            >
+              {visibleNotes.length === 0 && (
                 <div className="empty-list">
                   <div>§</div>
-                  <p>{search ? '找不到符合的筆記' : '這裡還沒有筆記'}</p>
-                  {!search && <button onClick={() => void createNote()}>建立第一篇筆記</button>}
+                  <p>
+                    {selectedNoteTag
+                      ? '沒有符合所選標籤的筆記'
+                      : search
+                        ? '找不到符合的筆記'
+                        : '這裡還沒有筆記'}
+                  </p>
+                  {selectedNoteTag ? (
+                    <button onClick={() => setSelectedNoteTag('')}>清除標籤篩選</button>
+                  ) : !search && (
+                    <button onClick={() => void createNote()}>建立第一篇筆記</button>
+                  )}
                 </div>
               )}
-              {notes.map((note) => (
+              {visibleNotes.map((note) => (
                 <div
                   key={note.id}
                   className={`note-card ${current.id === note.id ? 'active' : ''} ${draggingNoteID === note.id ? 'is-dragging' : ''} ${note.isTodo ? 'is-todo' : ''} ${note.todoCompleted ? 'is-completed' : ''}`}
@@ -2946,6 +3149,80 @@ export default function App() {
                   </button>
                 </div>
               ))}
+            </div>
+            {noteTagPanelOpen && (
+              <>
+                <div
+                  className="note-tag-panel-splitter"
+                  role="separator"
+                  aria-label="調整標籤面板高度"
+                  aria-orientation="horizontal"
+                  aria-valuemin={Math.round(MIN_NOTE_TAG_PANEL_RATIO * 100)}
+                  aria-valuemax={Math.round(MAX_NOTE_TAG_PANEL_RATIO * 100)}
+                  aria-valuenow={Math.round(noteTagPanelRatio * 100)}
+                  style={{ top: `${(1 - noteTagPanelRatio) * 100}%` }}
+                  tabIndex={0}
+                  onPointerDown={beginNoteTagPanelResize}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      adjustNoteTagPanelRatio(0.05);
+                    } else if (event.key === 'ArrowDown') {
+                      event.preventDefault();
+                      adjustNoteTagPanelRatio(-0.05);
+                    } else if (event.key === 'Home') {
+                      event.preventDefault();
+                      setNoteTagPanelRatio(MIN_NOTE_TAG_PANEL_RATIO);
+                    } else if (event.key === 'End') {
+                      event.preventDefault();
+                      setNoteTagPanelRatio(MAX_NOTE_TAG_PANEL_RATIO);
+                    }
+                  }}
+                />
+                <section
+                  className="note-tag-panel"
+                  aria-label="標籤面板"
+                  style={{ flexBasis: `${noteTagPanelRatio * 100}%` }}
+                >
+                  <header className="note-tag-panel-header">
+                    <div>
+                      <strong>標籤</strong>
+                      <span>
+                        {selectedNoteTag
+                          ? `${visibleNotes.length} / ${notes.length} 篇`
+                          : `${notes.length} 篇筆記`}
+                      </span>
+                    </div>
+                    {selectedNoteTag && (
+                      <button
+                        className="note-tag-panel-clear"
+                        type="button"
+                        onClick={() => setSelectedNoteTag('')}
+                      >
+                        清除
+                      </button>
+                    )}
+                  </header>
+                  <div className="note-tag-cloud" role="group" aria-label="目前筆記清單的標籤">
+                    {noteTags.length === 0 ? (
+                      <p className="note-tag-panel-empty">目前筆記清單沒有標籤</p>
+                    ) : noteTags.map((tag) => (
+                      <button
+                        className={`note-tag-chip ${selectedNoteTag === tag.title ? 'active' : ''}`}
+                        type="button"
+                        key={tag.title}
+                        aria-pressed={selectedNoteTag === tag.title}
+                        title={`${tag.title}，${tag.count} 篇筆記`}
+                        onClick={() => toggleNoteTag(tag.title)}
+                      >
+                        <span>#{tag.title}</span>
+                        <small>{tag.count}</small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </>
+            )}
             </div>
         </section>
       )}
@@ -4034,22 +4311,25 @@ export default function App() {
                   </label>
                   <label className="appearance-field">
                     <span>字型</span>
-                    <select
+                    <FluentSelect
                       value={customFontSelected ? '__custom' : fontFamily}
-                      onChange={(event) => {
-                        if (event.target.value === '__custom') {
+                      options={[
+                        ...FONT_PRESETS.map((preset) => ({
+                          value: preset.value,
+                          label: preset.label,
+                        })),
+                        { value: '__custom', label: '自訂字型…' },
+                      ]}
+                      ariaLabel="字型"
+                      onChange={(value) => {
+                        if (value === '__custom') {
                           setCustomFontSelected(true);
                           return;
                         }
                         setCustomFontSelected(false);
-                        setFontFamily(event.target.value);
+                        setFontFamily(value);
                       }}
-                    >
-                      {FONT_PRESETS.map((preset) => (
-                        <option key={preset.value} value={preset.value}>{preset.label}</option>
-                      ))}
-                      <option value="__custom">自訂字型…</option>
-                    </select>
+                    />
                   </label>
                   {customFontSelected && (
                     <label className="appearance-field custom-font-field">

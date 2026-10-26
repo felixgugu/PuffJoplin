@@ -1,17 +1,32 @@
 import { parseEditorMode, type EditorMode } from './editorTabs';
+import { sanitizeFontFamily } from './typography';
 
 export const SOURCE_LINE_NUMBERS_KEY = 'puffjoplin.source.showLineNumbers';
 export const EDITOR_PREFERENCES_KEY = 'puffjoplin.editorPreferences.v1';
 export const EDITOR_PREFERENCES_SETTING = 'editor.preferences';
+export const DEFAULT_SOURCE_FONT_FAMILY = 'Cascadia Code';
+
+export const SOURCE_FONT_PRESETS = [
+  { label: 'Cascadia Code', value: 'Cascadia Code' },
+  { label: 'Cascadia Mono', value: 'Cascadia Mono' },
+  { label: 'Consolas', value: 'Consolas' },
+  { label: 'Courier New', value: 'Courier New' },
+] as const;
+
+export type SourceFontPreset = typeof SOURCE_FONT_PRESETS[number];
+
+export interface SourceEditorTypography {
+  fontFamily: string;
+  fontScale: number;
+  fontWeight: number;
+  lineHeight: number;
+}
 
 export interface SourceEditorProfile {
   foreground: string;
   background: string;
   caretColor: string;
   gutterColor: string;
-  fontWeight: number;
-  fontScale: number;
-  lineHeight: number;
   caretWidth: number;
   heading: string;
   strong: string;
@@ -28,10 +43,11 @@ export interface SourceEditorProfile {
 }
 
 export interface EditorPreferences {
-  version: 1;
+  version: 2;
   defaultMode: EditorMode;
   showSourceLineNumbers: boolean;
   customSourceAppearance: boolean;
+  sourceTypography: SourceEditorTypography;
   sourceAppearance: {
     light: SourceEditorProfile;
     dark: SourceEditorProfile;
@@ -43,9 +59,6 @@ export const DEFAULT_LIGHT_SOURCE_PROFILE: Readonly<SourceEditorProfile> = {
   background: '#fbfaf8',
   caretColor: '#1b1b1b',
   gutterColor: '#8d8d8d',
-  fontWeight: 400,
-  fontScale: 1,
-  lineHeight: 1.75,
   caretWidth: 1,
   heading: '#1d5fa8',
   strong: '#8e3c82',
@@ -66,9 +79,6 @@ export const DEFAULT_DARK_SOURCE_PROFILE: Readonly<SourceEditorProfile> = {
   background: '#1f1f1f',
   caretColor: '#f5f5f5',
   gutterColor: '#898989',
-  fontWeight: 400,
-  fontScale: 1,
-  lineHeight: 1.75,
   caretWidth: 1,
   heading: '#79bdff',
   strong: '#f0a7e4',
@@ -84,14 +94,18 @@ export const DEFAULT_DARK_SOURCE_PROFILE: Readonly<SourceEditorProfile> = {
   string: '#79d6ca',
 };
 
-export const SOURCE_APPEARANCE_VARIABLE_NAMES = [
+export const SOURCE_TYPOGRAPHY_VARIABLE_NAMES = [
+  '--source-font-family',
+  '--source-font-size',
+  '--source-font-weight',
+  '--source-line-height',
+] as const;
+
+export const SOURCE_COLOR_VARIABLE_NAMES = [
   '--source-foreground',
   '--source-background',
   '--source-caret',
   '--source-gutter',
-  '--source-font-weight',
-  '--source-font-size',
-  '--source-line-height',
   '--source-caret-width',
   '--source-heading',
   '--source-strong',
@@ -107,12 +121,27 @@ export const SOURCE_APPEARANCE_VARIABLE_NAMES = [
   '--source-string',
 ] as const;
 
+export const SOURCE_APPEARANCE_VARIABLE_NAMES = [
+  ...SOURCE_TYPOGRAPHY_VARIABLE_NAMES,
+  ...SOURCE_COLOR_VARIABLE_NAMES,
+] as const;
+
+export function defaultSourceEditorTypography(): SourceEditorTypography {
+  return {
+    fontFamily: DEFAULT_SOURCE_FONT_FAMILY,
+    fontScale: 1,
+    fontWeight: 400,
+    lineHeight: 1.75,
+  };
+}
+
 export function defaultEditorPreferences(): EditorPreferences {
   return {
-    version: 1,
+    version: 2,
     defaultMode: 'sv',
     showSourceLineNumbers: true,
     customSourceAppearance: false,
+    sourceTypography: defaultSourceEditorTypography(),
     sourceAppearance: {
       light: { ...DEFAULT_LIGHT_SOURCE_PROFILE },
       dark: { ...DEFAULT_DARK_SOURCE_PROFILE },
@@ -132,6 +161,18 @@ export function normalizeSourceColor(value: unknown): string | null {
     return `#${color.slice(1).split('').map((part) => part + part).join('')}`.toLowerCase();
   }
   return null;
+}
+
+export function normalizeSourceFontFamily(value: unknown): string {
+  return sanitizeFontFamily(value) || DEFAULT_SOURCE_FONT_FAMILY;
+}
+
+export function sourceFontFamilyStack(value: unknown): string {
+  const family = normalizeSourceFontFamily(value);
+  const fallbacks = ['Cascadia Code', 'Cascadia Mono', 'Consolas']
+    .filter((fallback) => fallback !== family)
+    .map((fallback) => `"${fallback}"`);
+  return [`"${family}"`, ...fallbacks, 'monospace'].join(', ');
 }
 
 function normalizeNumber(
@@ -164,6 +205,33 @@ function normalizeSteppedNumber(
   );
 }
 
+function normalizeSourceTypography(
+  value: unknown,
+  fallback: SourceEditorTypography = defaultSourceEditorTypography(),
+): SourceEditorTypography {
+  const source = value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    fontFamily: normalizeSourceFontFamily(source.fontFamily ?? fallback.fontFamily),
+    fontWeight: normalizeSteppedNumber(
+      source.fontWeight,
+      fallback.fontWeight,
+      300,
+      800,
+      100,
+    ),
+    fontScale: normalizeSteppedNumber(source.fontScale, fallback.fontScale, 0.8, 1.8, 0.05),
+    lineHeight: normalizeSteppedNumber(
+      source.lineHeight,
+      fallback.lineHeight,
+      1.2,
+      2.2,
+      0.05,
+    ),
+  };
+}
+
 function normalizeProfile(
   value: unknown,
   fallback: SourceEditorProfile,
@@ -176,9 +244,6 @@ function normalizeProfile(
     background: normalizeSourceColor(source.background) ?? fallback.background,
     caretColor: normalizeSourceColor(source.caretColor) ?? fallback.caretColor,
     gutterColor: normalizeSourceColor(source.gutterColor) ?? fallback.gutterColor,
-    fontWeight: normalizeSteppedNumber(source.fontWeight, fallback.fontWeight, 300, 800, 100),
-    fontScale: normalizeSteppedNumber(source.fontScale, fallback.fontScale, 0.8, 1.8, 0.05),
-    lineHeight: normalizeSteppedNumber(source.lineHeight, fallback.lineHeight, 1.2, 2.2, 0.05),
     caretWidth: normalizeSteppedNumber(source.caretWidth, fallback.caretWidth, 1, 3, 1),
     heading: normalizeSourceColor(source.heading) ?? fallback.heading,
     strong: normalizeSourceColor(source.strong) ?? fallback.strong,
@@ -200,6 +265,7 @@ function normalizeProfile(
 export function parseEditorPreferences(
   raw: unknown,
   legacyLineNumbers: string | null = null,
+  preferredLegacyTheme: 'light' | 'dark' = 'light',
 ): EditorPreferences {
   let parsed: Record<string, unknown> = {};
   if (raw && typeof raw === 'object') {
@@ -216,13 +282,43 @@ export function parseEditorPreferences(
     typeof parsed.sourceAppearance === 'object'
     ? parsed.sourceAppearance as Record<string, unknown>
     : {};
+  const legacyProfileValue = sourceAppearance[preferredLegacyTheme];
+  const legacyProfile = legacyProfileValue && typeof legacyProfileValue === 'object'
+    ? legacyProfileValue as Record<string, unknown>
+    : {};
+  const defaultTypography = defaultSourceEditorTypography();
+  const legacyTypography: SourceEditorTypography = {
+    fontFamily: DEFAULT_SOURCE_FONT_FAMILY,
+    fontWeight: normalizeSteppedNumber(
+      legacyProfile.fontWeight,
+      defaultTypography.fontWeight,
+      300,
+      800,
+      100,
+    ),
+    fontScale: normalizeSteppedNumber(
+      legacyProfile.fontScale,
+      defaultTypography.fontScale,
+      0.8,
+      1.8,
+      0.05,
+    ),
+    lineHeight: normalizeSteppedNumber(
+      legacyProfile.lineHeight,
+      defaultTypography.lineHeight,
+      1.2,
+      2.2,
+      0.05,
+    ),
+  };
   return {
-    version: 1,
+    version: 2,
     defaultMode: parseEditorMode(parsed.defaultMode) ?? 'sv',
     showSourceLineNumbers: typeof parsed.showSourceLineNumbers === 'boolean'
       ? parsed.showSourceLineNumbers
       : parseShowSourceLineNumbers(legacyLineNumbers),
     customSourceAppearance: parsed.customSourceAppearance === true,
+    sourceTypography: normalizeSourceTypography(parsed.sourceTypography, legacyTypography),
     sourceAppearance: {
       light: normalizeProfile(sourceAppearance.light, DEFAULT_LIGHT_SOURCE_PROFILE),
       dark: normalizeProfile(sourceAppearance.dark, DEFAULT_DARK_SOURCE_PROFILE),
@@ -234,17 +330,25 @@ export function serializeEditorPreferences(preferences: EditorPreferences): stri
   return JSON.stringify(preferences);
 }
 
-export function sourceEditorCSSVariables(
+export function sourceTypographyCSSVariables(
+  typography: SourceEditorTypography,
+): Record<(typeof SOURCE_TYPOGRAPHY_VARIABLE_NAMES)[number], string> {
+  return {
+    '--source-font-family': sourceFontFamilyStack(typography.fontFamily),
+    '--source-font-size': `${typography.fontScale}rem`,
+    '--source-font-weight': String(typography.fontWeight),
+    '--source-line-height': String(typography.lineHeight),
+  };
+}
+
+export function sourceColorCSSVariables(
   profile: SourceEditorProfile,
-): Record<(typeof SOURCE_APPEARANCE_VARIABLE_NAMES)[number], string> {
+): Record<(typeof SOURCE_COLOR_VARIABLE_NAMES)[number], string> {
   return {
     '--source-foreground': profile.foreground,
     '--source-background': profile.background,
     '--source-caret': profile.caretColor,
     '--source-gutter': profile.gutterColor,
-    '--source-font-weight': String(profile.fontWeight),
-    '--source-font-size': `${profile.fontScale}rem`,
-    '--source-line-height': String(profile.lineHeight),
     '--source-caret-width': `${profile.caretWidth}px`,
     '--source-heading': profile.heading,
     '--source-strong': profile.strong,

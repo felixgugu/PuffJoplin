@@ -5,11 +5,17 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
+import FluentSelect from './FluentSelect';
 import {
+  DEFAULT_SOURCE_FONT_FAMILY,
   normalizeSourceColor,
-  sourceEditorCSSVariables,
+  normalizeSourceFontFamily,
+  SOURCE_FONT_PRESETS,
+  sourceColorCSSVariables,
+  sourceTypographyCSSVariables,
   type EditorPreferences,
   type SourceEditorProfile,
+  type SourceEditorTypography,
 } from './editorPreferences';
 import type { EditorMode } from './editorTabs';
 
@@ -153,11 +159,45 @@ export default function EditorSettings({
 }: EditorSettingsProps) {
   const [scheme, setScheme] = useState<'light' | 'dark'>(theme);
   const profile = preferences.sourceAppearance[scheme];
-  const previewStyle = sourceEditorCSSVariables(profile) as CSSProperties;
+  const sourceFontFamily = preferences.sourceTypography.fontFamily;
+  const sourceFontIsPreset = SOURCE_FONT_PRESETS.some(
+    (preset) => preset.value === sourceFontFamily,
+  );
+  const [customSourceFontSelected, setCustomSourceFontSelected] = useState(
+    !sourceFontIsPreset,
+  );
+  const [customSourceFontDraft, setCustomSourceFontDraft] = useState(sourceFontFamily);
+  const previewTypography = customSourceFontSelected
+    ? {
+        ...preferences.sourceTypography,
+        fontFamily: normalizeSourceFontFamily(customSourceFontDraft),
+      }
+    : preferences.sourceTypography;
+  const previewStyle = {
+    ...sourceTypographyCSSVariables(previewTypography),
+    ...sourceColorCSSVariables(profile),
+  } as CSSProperties;
 
   useEffect(() => {
     setScheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    setCustomSourceFontSelected(
+      !SOURCE_FONT_PRESETS.some((preset) => preset.value === sourceFontFamily),
+    );
+    setCustomSourceFontDraft(sourceFontFamily);
+  }, [sourceFontFamily]);
+
+  const updateSourceTypography = (changes: Partial<SourceEditorTypography>) => {
+    onChange({
+      ...preferences,
+      sourceTypography: {
+        ...preferences.sourceTypography,
+        ...changes,
+      },
+    });
+  };
 
   const updateProfile = (changes: Partial<SourceEditorProfile>) => {
     onChange({
@@ -215,17 +255,19 @@ export default function EditorSettings({
         <div className="settings-editor-general">
           <label className="appearance-field">
             <span>預設編輯模式</span>
-            <select
+            <FluentSelect<EditorMode>
               value={preferences.defaultMode}
-              onChange={(event) => onChange({
+              options={[
+                { value: 'sv', label: '原始碼' },
+                { value: 'ir', label: '即時渲染' },
+                { value: 'wysiwyg', label: '所見即所得' },
+              ]}
+              ariaLabel="預設編輯模式"
+              onChange={(value) => onChange({
                 ...preferences,
-                defaultMode: event.target.value as EditorMode,
+                defaultMode: value,
               })}
-            >
-              <option value="sv">原始碼</option>
-              <option value="ir">即時渲染</option>
-              <option value="wysiwyg">所見即所得</option>
-            </select>
+            />
             <small>已開啟或曾使用過的分頁會保留各自模式。</small>
           </label>
           <div className="appearance-field source-lines-field">
@@ -250,7 +292,127 @@ export default function EditorSettings({
         <div className="settings-section-heading">
           <div>
             <strong id="source-appearance-heading">原始碼外觀</strong>
-            <span>亮色與暗色佈景分別保存一組 CodeMirror 配色。</span>
+            <span>設定共用的 CodeMirror 字型，並分別保存亮色與暗色語法配色。</span>
+          </div>
+        </div>
+
+        <fieldset className="source-appearance-controls source-typography-controls">
+          <legend>字型</legend>
+          <div className="source-font-family-control">
+            <label className="appearance-field">
+              <span>字型家族</span>
+              <FluentSelect
+                value={customSourceFontSelected ? '__custom' : sourceFontFamily}
+                options={[
+                  ...SOURCE_FONT_PRESETS.map((preset) => ({
+                    value: preset.value,
+                    label: preset.label,
+                  })),
+                  { value: '__custom', label: '自訂字型…' },
+                ]}
+                ariaLabel="原始碼字型家族"
+                onChange={(value) => {
+                  if (value === '__custom') {
+                    setCustomSourceFontSelected(true);
+                    return;
+                  }
+                  setCustomSourceFontSelected(false);
+                  setCustomSourceFontDraft(value);
+                  updateSourceTypography({ fontFamily: value });
+                }}
+              />
+              <small>字型會套用到 Markdown 原始碼編輯器與上方預覽。</small>
+            </label>
+            {customSourceFontSelected && (
+              <label className="appearance-field custom-source-font-field">
+                <span>自訂字型名稱</span>
+                <input
+                  type="text"
+                  value={customSourceFontDraft}
+                  spellCheck={false}
+                  placeholder="例如：JetBrains Mono"
+                  onChange={(event) => {
+                    setCustomSourceFontDraft(event.target.value);
+                  }}
+                  onBlur={() => {
+                    const normalized = normalizeSourceFontFamily(customSourceFontDraft);
+                    setCustomSourceFontDraft(normalized);
+                    updateSourceTypography({ fontFamily: normalized });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      setCustomSourceFontDraft(sourceFontFamily);
+                    }
+                  }}
+                />
+                <small>
+                  必須是系統已安裝的字型；找不到時會使用
+                  {' '}
+                  {DEFAULT_SOURCE_FONT_FAMILY}
+                  {' '}
+                  等等寬 fallback。
+                </small>
+              </label>
+            )}
+          </div>
+          <div className="source-number-grid">
+            <label>
+              <span>文字字重</span>
+              <FluentSelect
+                value={String(preferences.sourceTypography.fontWeight)}
+                options={[300, 400, 500, 600, 700, 800].map((weight) => ({
+                  value: String(weight),
+                  label: String(weight),
+                }))}
+                ariaLabel="原始碼文字字重"
+                onChange={(next) => updateSourceTypography({ fontWeight: Number(next) })}
+              />
+            </label>
+            <label>
+              <span>
+                字級倍率
+                {' '}
+                <small>{preferences.sourceTypography.fontScale.toFixed(2)}×</small>
+              </span>
+              <input
+                type="range"
+                min={0.8}
+                max={1.8}
+                step={0.05}
+                value={preferences.sourceTypography.fontScale}
+                onChange={(event) => updateSourceTypography({
+                  fontScale: Number(event.target.value),
+                })}
+              />
+            </label>
+            <label>
+              <span>
+                行高
+                {' '}
+                <small>{preferences.sourceTypography.lineHeight.toFixed(2)}</small>
+              </span>
+              <input
+                type="range"
+                min={1.2}
+                max={2.2}
+                step={0.05}
+                value={preferences.sourceTypography.lineHeight}
+                onChange={(event) => updateSourceTypography({
+                  lineHeight: Number(event.target.value),
+                })}
+              />
+            </label>
+          </div>
+        </fieldset>
+
+        <div className="source-color-custom-heading">
+          <div>
+            <strong>原始碼配色</strong>
+            <span>自訂亮色與暗色佈景使用的 CodeMirror 顏色。</span>
           </div>
           <label className="appearance-toggle">
             <input
@@ -296,43 +458,13 @@ export default function EditorSettings({
           <span className="source-preview-marker">**Markdown 標記**</span>
         </div>
 
-        <fieldset className="source-appearance-controls" disabled={!preferences.customSourceAppearance}>
-          <legend>基礎外觀</legend>
+        <fieldset
+          className="source-appearance-controls"
+          disabled={!preferences.customSourceAppearance}
+        >
+          <legend>基礎配色</legend>
           {renderColorGroup('basic')}
           <div className="source-number-grid">
-            <label>
-              <span>文字字重</span>
-              <select
-                value={profile.fontWeight}
-                onChange={(event) => updateProfile({ fontWeight: Number(event.target.value) })}
-              >
-                {[300, 400, 500, 600, 700, 800].map((weight) => (
-                  <option value={weight} key={weight}>{weight}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>字級倍率 <small>{profile.fontScale.toFixed(2)}×</small></span>
-              <input
-                type="range"
-                min={0.8}
-                max={1.8}
-                step={0.05}
-                value={profile.fontScale}
-                onChange={(event) => updateProfile({ fontScale: Number(event.target.value) })}
-              />
-            </label>
-            <label>
-              <span>行高 <small>{profile.lineHeight.toFixed(2)}</small></span>
-              <input
-                type="range"
-                min={1.2}
-                max={2.2}
-                step={0.05}
-                value={profile.lineHeight}
-                onChange={(event) => updateProfile({ lineHeight: Number(event.target.value) })}
-              />
-            </label>
             <label>
               <span>游標寬度 <small>{profile.caretWidth} px</small></span>
               <input

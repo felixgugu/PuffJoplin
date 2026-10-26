@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import EditorSettings from './EditorSettings';
 import {
   defaultEditorPreferences,
+  sourceFontFamilyStack,
   type EditorPreferences,
 } from './editorPreferences';
 
@@ -51,11 +52,15 @@ describe('EditorSettings', () => {
 
     const panel = document.querySelector<HTMLElement>('#settings-panel-editor');
     expect(panel?.hidden).toBe(false);
-    expect(document.querySelector<HTMLSelectElement>('select')?.value).toBe('sv');
+    expect(document.querySelector<HTMLElement>('[role="combobox"]')?.textContent)
+      .toContain('原始碼');
     expect(document.querySelectorAll('fieldset.source-appearance-controls'))
-      .toHaveLength(2);
+      .toHaveLength(3);
+    expect(document.querySelector<HTMLFieldSetElement>(
+      'fieldset.source-typography-controls',
+    )?.disabled).toBe(false);
     expect(Array.from(document.querySelectorAll<HTMLFieldSetElement>(
-      'fieldset.source-appearance-controls',
+      'fieldset.source-appearance-controls:not(.source-typography-controls)',
     )).every((fieldset) => fieldset.disabled)).toBe(true);
   });
 
@@ -70,6 +75,63 @@ describe('EditorSettings', () => {
     const preview = document.querySelector<HTMLElement>('.source-appearance-preview');
     expect(preview?.style.getPropertyValue('--source-foreground')).toBe('#1b1b1b');
     expect(preview?.style.getPropertyValue('--source-background')).toBe('#fbfaf8');
+    expect(preview?.style.getPropertyValue('--source-font-family'))
+      .toBe(sourceFontFamilyStack('Cascadia Code'));
+  });
+
+  it('updates the shared source font family independently of custom colors', () => {
+    const { onChange } = renderSettings();
+    const trigger = document.querySelector<HTMLButtonElement>(
+      '[role="combobox"][aria-label="原始碼字型家族"]',
+    );
+
+    act(() => trigger?.click());
+    const consolas = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Consolas'));
+    act(() => consolas?.click());
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      customSourceAppearance: false,
+      sourceTypography: expect.objectContaining({
+        fontFamily: 'Consolas',
+      }),
+    }));
+  });
+
+  it('previews and commits a custom installed font name', () => {
+    const { onChange } = renderSettings();
+    const trigger = document.querySelector<HTMLButtonElement>(
+      '[role="combobox"][aria-label="原始碼字型家族"]',
+    );
+    act(() => trigger?.click());
+    const custom = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ).find((option) => option.textContent?.includes('自訂字型'));
+    act(() => custom?.click());
+
+    const input = document.querySelector<HTMLInputElement>(
+      'input[placeholder="例如：JetBrains Mono"]',
+    );
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    act(() => {
+      valueSetter?.call(input, 'JetBrains Mono');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const preview = document.querySelector<HTMLElement>('.source-appearance-preview');
+    expect(preview?.style.getPropertyValue('--source-font-family'))
+      .toBe(sourceFontFamilyStack('JetBrains Mono'));
+
+    act(() => input?.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      sourceTypography: expect.objectContaining({
+        fontFamily: 'JetBrains Mono',
+      }),
+    }));
   });
 
   it('honors the hidden tab state and reset action', () => {

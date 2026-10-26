@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_NOTE_SORT_BY,
   DEFAULT_NOTE_SORT_DIRECTION,
+  DEFAULT_NOTE_TAG_PANEL_RATIO,
   DEFAULT_TODO_SORT_BY,
   DEFAULT_TODO_STATUS,
   DEFAULT_SEARCH_FIELD,
+  normalizeNoteTagPanelRatio,
   parseNoteSortBy,
   parseNoteSortDirection,
+  parseNoteTagPanelOpen,
+  parseNoteTagPanelRatio,
   parseSearchField,
   parseSearchScope,
   parseSearchToggle,
@@ -44,6 +48,16 @@ describe('note list preferences', () => {
     expect(parseShowNoteSummary('true')).toBe(true);
     expect(parseShowNoteSummary('false')).toBe(false);
     expect(parseShowNoteSummary('unexpected')).toBe(true);
+  });
+
+  it('defaults the tag panel to a hidden one-third split', () => {
+    expect(parseNoteTagPanelOpen(null)).toBe(false);
+    expect(parseNoteTagPanelOpen('true')).toBe(true);
+    expect(parseNoteTagPanelRatio(null)).toBe(DEFAULT_NOTE_TAG_PANEL_RATIO);
+    expect(parseNoteTagPanelRatio('0.42')).toBe(0.42);
+    expect(parseNoteTagPanelRatio('bad')).toBe(DEFAULT_NOTE_TAG_PANEL_RATIO);
+    expect(normalizeNoteTagPanelRatio(0.05)).toBe(0.2);
+    expect(normalizeNoteTagPanelRatio(0.95)).toBe(0.7);
   });
 
   it('defaults search scope to all notebooks', () => {
