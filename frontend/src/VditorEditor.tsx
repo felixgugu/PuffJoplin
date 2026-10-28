@@ -21,6 +21,11 @@ import EditorMediaContextMenu, {
 } from './EditorMediaContextMenu';
 import SourceLinePreview from './SourceLinePreview';
 import {
+  sourceOutlineHasRoom,
+  SourceOutline,
+  type SourceHeading,
+} from './sourceOutline';
+import {
   findSourceLinePreview,
   findSourcePreviewItems,
   sourcePreviewDeletion,
@@ -929,6 +934,8 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     let disposed = false;
     let fullscreenActive = false;
     let codeMirrorSource: CodeMirrorSource | null = null;
+    let sourceOutline: SourceOutline | null = null;
+    let sourceOutlineResizeObserver: ResizeObserver | null = null;
     let sourceVisibilityObserver: MutationObserver | null = null;
     let sourcePreviewTimer: number | null = null;
     let previewAllowedInRichMode = false;
@@ -1240,6 +1247,38 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         previewAllowedInRichMode = false;
       }
       codeMirrorSource.setVisible(visible);
+      const sourceMode = mode === 'sv';
+      const sourceOutlineFits = sourceOutlineHasRoom(host.clientWidth);
+      if (sourceMode) {
+        const outlineItem = editor.vditor?.toolbar?.elements?.outline;
+        if (outlineItem) outlineItem.style.display = 'block';
+        if (!sourceOutlineFits && editor.vditor?.options.outline?.enable) {
+          editor.vditor.options.outline.enable = false;
+        }
+        const outlineOpen =
+          sourceOutlineFits && editor.vditor?.options.outline?.enable === true;
+        const outlineButton = editorModeButton(editor, 'outline');
+        if (outlineButton) {
+          outlineButton.classList.toggle('vditor-menu--current', outlineOpen);
+          outlineButton.classList.toggle('vditor-menu--disabled', !sourceOutlineFits);
+          outlineButton.disabled = !sourceOutlineFits;
+          outlineButton.setAttribute('aria-expanded', String(outlineOpen));
+          outlineButton.setAttribute('aria-pressed', String(outlineOpen));
+          outlineButton.setAttribute('aria-disabled', String(!sourceOutlineFits));
+        }
+        sourceOutline?.setAvailable(true);
+        sourceOutline?.setOpen(outlineOpen);
+      } else {
+        sourceOutline?.setAvailable(false);
+        const outlineButton = editorModeButton(editor, 'outline');
+        if (outlineButton) {
+          outlineButton.disabled = false;
+          outlineButton.classList.remove('vditor-menu--disabled');
+          outlineButton.removeAttribute('aria-disabled');
+          outlineButton.removeAttribute('aria-expanded');
+          outlineButton.removeAttribute('aria-pressed');
+        }
+      }
       const content = codeMirrorSource.element.parentElement;
       content?.classList.toggle('is-codemirror-active', visible);
       if (content) {
@@ -1277,11 +1316,34 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       };
       sourceTextarea.setRangeText = guardedSetRangeText as HTMLTextAreaElement['setRangeText'];
       try {
+        sourceOutline = new SourceOutline({
+          parent: content,
+          onJump: (heading: SourceHeading) => {
+            codeMirrorSource?.jumpToHeading(heading);
+          },
+          onRequestClose: () => {
+            if (editor.vditor?.options.outline) {
+              editor.vditor.options.outline.enable = false;
+            }
+            const outlineButton = editorModeButton(editor, 'outline');
+            if (outlineButton) {
+              outlineButton.classList.remove('vditor-menu--current');
+              outlineButton.setAttribute('aria-expanded', 'false');
+              outlineButton.setAttribute('aria-pressed', 'false');
+            }
+            sourceOutline?.setOpen(false);
+            refreshEditorViewportRef.current();
+            codeMirrorSource?.focus();
+          },
+        });
         codeMirrorSource = new CodeMirrorSource({
           parent: content,
           textarea: sourceTextarea,
           value: sourceTextarea.value,
           showLineNumbers: showSourceLineNumbersRef.current,
+          onOutlineChange: (headings, activeHeading) => {
+            sourceOutline?.setState(headings, activeHeading);
+          },
           onChange: (markdown) => {
             const stored = toStoredMarkdown(
               markdown,
@@ -1309,6 +1371,8 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           onLineActivate: handleSourceLineActivate,
         });
       } catch (error) {
+        sourceOutline?.destroy();
+        sourceOutline = null;
         const message = error instanceof Error ? error.message : String(error);
         const stack = error instanceof Error ? error.stack || '' : '';
         void api.reportFrontendError(
@@ -1332,6 +1396,15 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     };
     initializeSourceEditorRef.current = initializeSourceEditor;
     initializeSourceEditor();
+    let sourceOutlineHadRoom = sourceOutlineHasRoom(host.clientWidth);
+    sourceOutlineResizeObserver = new ResizeObserver(() => {
+      const hasRoom = sourceOutlineHasRoom(host.clientWidth);
+      if (hasRoom === sourceOutlineHadRoom) return;
+      sourceOutlineHadRoom = hasRoom;
+      refreshSourceEditorRef.current();
+      refreshEditorViewportRef.current();
+    });
+    sourceOutlineResizeObserver.observe(host);
     const toolbar = editor.vditor?.toolbar?.element;
     if (toolbar) applyToolbarTitles(toolbar);
     const viewportController = new EditorViewportController(host);
@@ -1464,6 +1537,33 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     };
     const handleEditorClick = (event: Event) => {
       const target = event.target;
+      const outlineAction = target instanceof Element
+        ? target.closest<HTMLButtonElement>('button[data-type="outline"]')
+        : null;
+      if (outlineAction &&
+        editor.getCurrentMode() === 'sv' &&
+        sourceOutline) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!sourceOutlineHasRoom(host.clientWidth)) {
+          if (editor.vditor?.options.outline) {
+            editor.vditor.options.outline.enable = false;
+          }
+          sourceOutline.setOpen(false);
+          refreshSourceEditorRef.current();
+          return;
+        }
+        const open = editor.vditor?.options.outline?.enable !== true;
+        if (editor.vditor?.options.outline) {
+          editor.vditor.options.outline.enable = open;
+        }
+        sourceOutline.setOpen(open);
+        outlineAction.classList.toggle('vditor-menu--current', open);
+        outlineAction.setAttribute('aria-expanded', String(open));
+        outlineAction.setAttribute('aria-pressed', String(open));
+        refreshEditorViewportRef.current();
+        return;
+      }
       const headingAction = target instanceof Element
         ? target.closest<HTMLButtonElement>('button[data-tag^="h"]')
         : null;
@@ -1549,9 +1649,13 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       refreshEditorViewportRef.current = () => undefined;
       refreshSourceEditorRef.current = () => undefined;
       initializeSourceEditorRef.current = () => undefined;
+      sourceOutlineResizeObserver?.disconnect();
+      sourceOutlineResizeObserver = null;
       sourceVisibilityObserver?.disconnect();
       sourceEditorRef.current = null;
       codeMirrorSource?.destroy();
+      sourceOutline?.destroy();
+      sourceOutline = null;
       viewportController.destroy();
       clearTextColorHighlights();
       fullscreenObserver.disconnect();

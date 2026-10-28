@@ -325,6 +325,7 @@ describe('stylesheet structure', () => {
 
   it('keeps the Vditor toolbar above the CodeMirror source editor', () => {
     let toolbarZIndex = '';
+    let toolbarPaddingLeft = '';
     let sourceDisplay = '';
     let mirrorPointerEvents = '';
     root.walkRules((rule) => {
@@ -336,6 +337,7 @@ describe('stylesheet structure', () => {
       );
       if (rule.selectors.includes('.vditor-editor-host .vditor-toolbar')) {
         toolbarZIndex = declarations.get('z-index') || '';
+        toolbarPaddingLeft = declarations.get('padding-left') || '';
       }
       if (rule.selectors.includes('.puff-codemirror-source.is-visible')) {
         sourceDisplay = declarations.get('display') || '';
@@ -348,8 +350,37 @@ describe('stylesheet structure', () => {
     });
 
     expect(toolbarZIndex).toBe('20');
+    expect(toolbarPaddingLeft).toBe('clamp(12px, 3vw, 28px)');
     expect(sourceDisplay).toBe('flex');
     expect(mirrorPointerEvents).toBe('none');
+  });
+
+  it('keeps the source outline fixed on wide editors and hidden on narrow ones', () => {
+    let panelWidth = '';
+    let narrowDisplay = '';
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const declarations = new Map(
+        rule.nodes
+          .filter((node) => node.type === 'decl')
+          .map((node) => [node.prop, node.value]),
+      );
+      if (
+        atRuleContext(rule) === '' &&
+        rule.selectors.includes('.source-outline-panel')
+      ) {
+        panelWidth = declarations.get('width') || panelWidth;
+      }
+      if (
+        atRuleContext(rule) === '@container (max-width: 760px)' &&
+        rule.selectors.includes('.source-outline-panel')
+      ) {
+        narrowDisplay = declarations.get('display') || narrowDisplay;
+      }
+    });
+
+    expect(panelWidth).toBe('250px');
+    expect(narrowDisplay).toBe('none');
   });
 
   it('exposes editor modes as direct toolbar buttons and hides the dropdown controller', () => {

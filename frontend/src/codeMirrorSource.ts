@@ -36,6 +36,11 @@ import {
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { formatMarkdownTables } from './markdownTableFormat';
+import {
+  activeSourceHeading,
+  markdownSourceHeadings,
+  type SourceHeading,
+} from './sourceOutline';
 
 function foldMarkerDOM(open: boolean): HTMLElement {
   const marker = document.createElement('span');
@@ -309,6 +314,10 @@ export interface CodeMirrorSourceOptions {
   onBlur: () => void;
   onScroll: () => void;
   onLineActivate?: (line: CodeMirrorLineActivation | null) => void;
+  onOutlineChange?: (
+    headings: readonly SourceHeading[],
+    activeHeading: SourceHeading | null,
+  ) => void;
 }
 
 export class CodeMirrorSource {
@@ -319,7 +328,10 @@ export class CodeMirrorSource {
   private readonly textarea: HTMLTextAreaElement;
   private readonly onChange: (markdown: string) => void;
   private readonly onLineActivate?: (line: CodeMirrorLineActivation | null) => void;
+  private readonly onOutlineChange?: CodeMirrorSourceOptions['onOutlineChange'];
   private readonly lineNumbersCompartment = new Compartment();
+  private outlineHeadings: readonly SourceHeading[] = [];
+  private outlineTimer: number | null = null;
   private applyingExternal = false;
   private destroyed = false;
 
@@ -327,6 +339,7 @@ export class CodeMirrorSource {
     this.textarea = options.textarea;
     this.onChange = options.onChange;
     this.onLineActivate = options.onLineActivate;
+    this.onOutlineChange = options.onOutlineChange;
     this.element = document.createElement('div');
     this.element.className = 'puff-codemirror-source';
     const preview = Array.from(options.parent.children).find(
@@ -395,6 +408,8 @@ export class CodeMirrorSource {
           EditorView.updateListener.of((update) => {
             if (!update.docChanged && !update.selectionSet) return;
             this.syncMirror();
+            if (update.docChanged) this.scheduleOutlineRefresh();
+            else this.emitOutline();
             if (!update.docChanged || this.applyingExternal) return;
             this.onLineActivate?.(null);
             this.onChange(update.state.doc.toString());
@@ -416,6 +431,7 @@ export class CodeMirrorSource {
       options.onScroll();
     }, { passive: true });
     this.syncMirror();
+    this.refreshOutline();
   }
 
   getValue(): string {
@@ -477,6 +493,10 @@ export class CodeMirrorSource {
     });
     this.view.focus();
     this.syncMirror();
+  }
+
+  jumpToHeading(heading: SourceHeading) {
+    this.selectRange(heading.from, heading.from, true);
   }
 
   replaceRange(from: number, to: number, text: string, focus = true) {
@@ -599,9 +619,38 @@ export class CodeMirrorSource {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (this.outlineTimer !== null) {
+      window.clearTimeout(this.outlineTimer);
+      this.outlineTimer = null;
+    }
     this.onLineActivate?.(null);
     this.view.destroy();
     this.element.remove();
+  }
+
+  private scheduleOutlineRefresh() {
+    if (this.outlineTimer !== null) window.clearTimeout(this.outlineTimer);
+    this.outlineTimer = window.setTimeout(() => {
+      this.outlineTimer = null;
+      this.refreshOutline();
+    }, 120);
+  }
+
+  private refreshOutline() {
+    if (this.destroyed) return;
+    this.outlineHeadings = markdownSourceHeadings(this.view.state);
+    this.emitOutline();
+  }
+
+  private emitOutline() {
+    if (this.destroyed) return;
+    this.onOutlineChange?.(
+      this.outlineHeadings,
+      activeSourceHeading(
+        this.outlineHeadings,
+        this.view.state.selection.main.head,
+      ),
+    );
   }
 
   private syncMirror() {

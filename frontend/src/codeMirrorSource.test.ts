@@ -10,10 +10,18 @@ import {
   markdownHeadingText,
   markdownInlineCodeRanges,
 } from './codeMirrorSource';
+import type { SourceHeading } from './sourceOutline';
 
 let source: CodeMirrorSource | null = null;
 
-function createSource(markdown: string, onChange = vi.fn()) {
+function createSource(
+  markdown: string,
+  onChange = vi.fn(),
+  onOutlineChange?: (
+    headings: readonly SourceHeading[],
+    activeHeading: SourceHeading | null,
+  ) => void,
+) {
   const parent = document.createElement('div');
   document.body.append(parent);
   const textarea = document.createElement('textarea');
@@ -26,6 +34,7 @@ function createSource(markdown: string, onChange = vi.fn()) {
     onChange,
     onBlur: vi.fn(),
     onScroll: vi.fn(),
+    onOutlineChange,
   });
   return source;
 }
@@ -33,6 +42,7 @@ function createSource(markdown: string, onChange = vi.fn()) {
 afterEach(() => {
   source?.destroy();
   source = null;
+  vi.useRealTimers();
   document.body.replaceChildren();
 });
 
@@ -226,5 +236,35 @@ describe('CodeMirror range updates', () => {
 
     expect(editor.getValue()).toBe('After');
     expect(document.activeElement).toBe(outsideButton);
+  });
+
+  it('publishes Markdown headings and jumps to the selected heading', () => {
+    vi.useFakeTimers();
+    const reports: Array<{
+      headings: readonly SourceHeading[];
+      activeHeading: SourceHeading | null;
+    }> = [];
+    const editor = createSource(
+      '# One\n\nText',
+      vi.fn(),
+      (headings, activeHeading) => reports.push({ headings, activeHeading }),
+    );
+
+    expect(reports.at(-1)?.headings.map((heading) => heading.label)).toEqual(['One']);
+    expect(reports.at(-1)?.activeHeading?.label).toBe('One');
+
+    editor.view.dispatch({
+      changes: { from: editor.getValue().length, insert: '\n\n## Two' },
+    });
+    vi.advanceTimersByTime(120);
+
+    const headings = reports.at(-1)?.headings ?? [];
+    const child = headings[0]?.children[0];
+    expect(child?.label).toBe('Two');
+    expect(child).toBeDefined();
+
+    editor.jumpToHeading(child!);
+    expect(editor.getSelection()).toEqual({ from: child!.from, to: child!.from });
+    expect(reports.at(-1)?.activeHeading?.label).toBe('Two');
   });
 });
