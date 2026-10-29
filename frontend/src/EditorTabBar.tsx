@@ -6,6 +6,7 @@ interface EditorTabBarProps {
   onActivate: (id: string) => void;
   onTogglePin: (id: string) => void;
   onClose: (id: string) => void;
+  onIntent?: (id: string) => void;
 }
 
 export default function EditorTabBar({
@@ -13,6 +14,7 @@ export default function EditorTabBar({
   onActivate,
   onTogglePin,
   onClose,
+  onIntent,
 }: EditorTabBarProps) {
   const allTabs = tabs.preview ? [...tabs.pinned, tabs.preview] : tabs.pinned;
   if (allTabs.length === 0) return null;
@@ -33,6 +35,9 @@ export default function EditorTabBar({
               aria-selected={active}
               title={tab.title}
               onClick={() => onActivate(tab.id)}
+              onPointerEnter={() => onIntent?.(tab.id)}
+              onPointerDown={() => onIntent?.(tab.id)}
+              onFocus={() => onIntent?.(tab.id)}
             >
               <span>{tab.title}</span>
             </button>

@@ -9,9 +9,12 @@ import {
 interface ScrollbarControls {
   track: HTMLDivElement;
   thumb: HTMLDivElement;
+  horizontalTrack: HTMLDivElement;
+  horizontalThumb: HTMLDivElement;
   target: HTMLElement;
   onScroll: () => void;
   onKeyDown: (event: KeyboardEvent) => void;
+  onHorizontalKeyDown: (event: KeyboardEvent) => void;
 }
 
 const scrollbarTrackWidth = 14;
@@ -21,9 +24,12 @@ function isVisible(element: HTMLElement): boolean {
 }
 
 function isScrollable(element: HTMLElement): boolean {
-  if (!isVisible(element) || element.scrollHeight <= element.clientHeight + 1) return false;
-  const overflowY = window.getComputedStyle(element).overflowY;
-  return overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
+  if (!isVisible(element)) return false;
+  const style = window.getComputedStyle(element);
+  const allows = (value: string) => value === 'auto' || value === 'scroll' || value === 'overlay';
+  const scrollableY = element.scrollHeight > element.clientHeight + 1 && allows(style.overflowY);
+  const scrollableX = element.scrollWidth > element.clientWidth + 1 && allows(style.overflowX);
+  return scrollableY || scrollableX;
 }
 
 export class EditorViewportController {
@@ -60,6 +66,7 @@ export class EditorViewportController {
       this.mutationObserver.observe(content, {
         attributes: true,
         attributeFilter: ['class', 'style'],
+        childList: true,
         subtree: true,
       });
     }
@@ -315,15 +322,110 @@ export class EditorViewportController {
     track.addEventListener('pointerup', finishDrag);
     track.addEventListener('pointercancel', finishDrag);
     track.addEventListener('keydown', onKeyDown);
-    this.scrollbars.set(target, { track, thumb, target, onScroll, onKeyDown });
+
+    const horizontalTrack = document.createElement('div');
+    horizontalTrack.className = 'puff-editor-scrollbar is-horizontal';
+    horizontalTrack.tabIndex = 0;
+    horizontalTrack.setAttribute('role', 'scrollbar');
+    horizontalTrack.setAttribute('aria-orientation', 'horizontal');
+    horizontalTrack.setAttribute('aria-label', '水平捲動編輯區內容');
+    horizontalTrack.hidden = true;
+    const horizontalThumb = document.createElement('div');
+    horizontalThumb.className = 'puff-editor-scrollbar-thumb';
+    horizontalTrack.appendChild(horizontalThumb);
+    this.host.appendChild(horizontalTrack);
+
+    let dragStartX = 0;
+    let dragStartThumbX = 0;
+    let draggingX = false;
+    const setFromThumbX = (thumbLeft: number) => {
+      const geometry = scrollbarGeometry(
+        0,
+        target.scrollWidth,
+        target.clientWidth,
+        horizontalTrack.clientWidth,
+      );
+      target.scrollLeft = scrollTopFromThumbTop(
+        thumbLeft,
+        geometry.thumbHeight,
+        target.scrollWidth,
+        target.clientWidth,
+        horizontalTrack.clientWidth,
+      );
+      this.updateScrollbar(target);
+    };
+    const onHorizontalPointerDown = (event: PointerEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const geometry = scrollbarGeometry(
+        target.scrollLeft,
+        target.scrollWidth,
+        target.clientWidth,
+        horizontalTrack.clientWidth,
+      );
+      const trackRect = horizontalTrack.getBoundingClientRect();
+      const x = event.clientX - trackRect.left;
+      const clickedThumb = x >= geometry.thumbTop && x <= geometry.thumbTop + geometry.thumbHeight;
+      dragStartThumbX = clickedThumb
+        ? geometry.thumbTop
+        : Math.max(0, Math.min(geometry.maximumThumbTop, x - geometry.thumbHeight / 2));
+      if (!clickedThumb) setFromThumbX(dragStartThumbX);
+      dragStartX = event.clientX;
+      draggingX = true;
+      horizontalTrack.classList.add('is-dragging');
+      document.body.classList.add('editor-scrollbar-dragging', 'editor-scrollbar-dragging-x');
+      horizontalTrack.setPointerCapture(event.pointerId);
+    };
+    const onHorizontalPointerMove = (event: PointerEvent) => {
+      if (!draggingX) return;
+      setFromThumbX(dragStartThumbX + event.clientX - dragStartX);
+    };
+    const finishHorizontalDrag = (event: PointerEvent) => {
+      if (!draggingX) return;
+      draggingX = false;
+      horizontalTrack.classList.remove('is-dragging');
+      document.body.classList.remove('editor-scrollbar-dragging', 'editor-scrollbar-dragging-x');
+      if (horizontalTrack.hasPointerCapture(event.pointerId)) {
+        horizontalTrack.releasePointerCapture(event.pointerId);
+      }
+    };
+    const onHorizontalKeyDown = (event: KeyboardEvent) => {
+      let next = target.scrollLeft;
+      if (event.key === 'ArrowLeft') next -= 60;
+      else if (event.key === 'ArrowRight') next += 60;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = target.scrollWidth;
+      else return;
+      event.preventDefault();
+      target.scrollLeft = next;
+    };
+    horizontalTrack.addEventListener('pointerdown', onHorizontalPointerDown);
+    horizontalTrack.addEventListener('pointermove', onHorizontalPointerMove);
+    horizontalTrack.addEventListener('pointerup', finishHorizontalDrag);
+    horizontalTrack.addEventListener('pointercancel', finishHorizontalDrag);
+    horizontalTrack.addEventListener('keydown', onHorizontalKeyDown);
+
+    this.scrollbars.set(target, {
+      track,
+      thumb,
+      horizontalTrack,
+      horizontalThumb,
+      target,
+      onScroll,
+      onKeyDown,
+      onHorizontalKeyDown,
+    });
   }
 
   private updateScrollbar(target: HTMLElement) {
     const controls = this.scrollbars.get(target);
     if (!controls) return;
-    const { track, thumb } = controls;
+    const { track, thumb, horizontalTrack, horizontalThumb } = controls;
     const hostRect = this.host.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
+    const verticalOverflow = target.scrollHeight > target.clientHeight + 1;
+    const horizontalOverflow = target.scrollWidth > target.clientWidth + 1;
+    track.hidden = !verticalOverflow;
     track.style.left = `${targetRect.right - hostRect.left - scrollbarTrackWidth}px`;
     track.style.top = `${targetRect.top - hostRect.top}px`;
     track.style.height = `${target.clientHeight}px`;
@@ -338,6 +440,30 @@ export class EditorViewportController {
     track.setAttribute('aria-valuemin', '0');
     track.setAttribute('aria-valuemax', String(geometry.maximumScrollTop));
     track.setAttribute('aria-valuenow', String(Math.round(target.scrollTop)));
+
+    horizontalTrack.hidden = !horizontalOverflow;
+    if (horizontalOverflow) {
+      const railWidth = Math.max(
+        80,
+        target.clientWidth - (verticalOverflow ? scrollbarTrackWidth : 0) - 2,
+      );
+      horizontalTrack.style.left = `${targetRect.left - hostRect.left + 1}px`;
+      horizontalTrack.style.top = `${
+        targetRect.top - hostRect.top + target.clientHeight - scrollbarTrackWidth + 1
+      }px`;
+      horizontalTrack.style.width = `${railWidth}px`;
+      const horizontal = scrollbarGeometry(
+        target.scrollLeft,
+        target.scrollWidth,
+        target.clientWidth,
+        railWidth,
+      );
+      horizontalThumb.style.width = `${horizontal.thumbHeight}px`;
+      horizontalThumb.style.transform = `translateX(${horizontal.thumbTop}px)`;
+      horizontalTrack.setAttribute('aria-valuemin', '0');
+      horizontalTrack.setAttribute('aria-valuemax', String(horizontal.maximumScrollTop));
+      horizontalTrack.setAttribute('aria-valuenow', String(Math.round(target.scrollLeft)));
+    }
   }
 
   private removeScrollbar(target: HTMLElement) {
@@ -345,10 +471,12 @@ export class EditorViewportController {
     if (!controls) return;
     target.removeEventListener('scroll', controls.onScroll);
     controls.track.removeEventListener('keydown', controls.onKeyDown);
+    controls.horizontalTrack.removeEventListener('keydown', controls.onHorizontalKeyDown);
     target.classList.remove('puff-overlay-scroll-target');
     target.style.removeProperty('scrollbar-width');
     this.resizeObserver.unobserve(target);
     controls.track.remove();
+    controls.horizontalTrack.remove();
     this.scrollbars.delete(target);
   }
 }

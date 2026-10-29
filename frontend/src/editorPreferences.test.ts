@@ -31,6 +31,7 @@ describe('source editor preferences', () => {
     expect(preferences.version).toBe(2);
     expect(preferences.defaultMode).toBe('sv');
     expect(preferences.showSourceLineNumbers).toBe(true);
+    expect(preferences.sourceWordWrap).toBe(true);
     expect(preferences.customSourceAppearance).toBe(false);
     expect(preferences.sourceTypography).toEqual({
       fontFamily: DEFAULT_SOURCE_FONT_FAMILY,
@@ -45,6 +46,14 @@ describe('source editor preferences', () => {
   it('migrates the legacy line-number preference', () => {
     expect(parseEditorPreferences(null, 'false').showSourceLineNumbers).toBe(false);
     expect(parseEditorPreferences(null, 'true').showSourceLineNumbers).toBe(true);
+  });
+
+  it('enables source word wrap by default and keeps an explicit off choice', () => {
+    expect(parseEditorPreferences(null).sourceWordWrap).toBe(true);
+    expect(parseEditorPreferences(JSON.stringify({ sourceWordWrap: false })).sourceWordWrap)
+      .toBe(false);
+    expect(parseEditorPreferences(JSON.stringify({ sourceWordWrap: 'no' })).sourceWordWrap)
+      .toBe(true);
   });
 
   it('normalizes colors and bounded source appearance values', () => {

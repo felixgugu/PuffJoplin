@@ -181,6 +181,52 @@ describe('stylesheet structure', () => {
     expect(componentSource).toContain("borderLeftWidth: 'var(--source-caret-width)'");
   });
 
+  it('isolates Mermaid rendering from app-wide transitions', () => {
+    const declarations = new Map<string, Map<string, { value: string; important: boolean }>>();
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const selector = rule.selector.replace(/\s+/g, ' ');
+      const values = declarations.get(selector) ?? new Map<string, { value: string; important: boolean }>();
+      for (const node of rule.nodes) {
+        if (node.type === 'decl') values.set(node.prop, { value: node.value, important: Boolean(node.important) });
+      }
+      declarations.set(selector, values);
+    });
+
+    const isolation = declarations.get('.puff-diagram-rendering, .puff-diagram-rendering *');
+    expect(isolation?.get('transition')).toEqual({ value: 'none', important: true });
+    expect(isolation?.get('animation')).toEqual({ value: 'none', important: true });
+
+    const diagramSvg = declarations.get(
+      '.vditor-editor-host .vditor-reset .language-mermaid svg',
+    );
+    expect(diagramSvg?.get('max-width')?.value).toBe('100%');
+    expect(diagramSvg?.get('height')?.value).toBe('auto');
+    expect(
+      declarations.get('.vditor-editor-host .vditor-reset .language-mermaid, .vditor-editor-host .vditor-reset .language-mermaid *')
+        ?.get('font-family')?.value,
+    ).toBe('var(--font-family-ui)');
+
+    const reducedMotion = root.nodes.find(
+      (node) => node.type === 'atrule'
+        && node.name === 'media'
+        && node.params === '(prefers-reduced-motion: reduce)',
+    );
+    expect(reducedMotion?.type).toBe('atrule');
+    if (reducedMotion?.type === 'atrule') {
+      const universal = reducedMotion.nodes?.find((node) => node.type === 'rule');
+      const values = new Map(
+        universal?.type === 'rule'
+          ? universal.nodes
+            .filter((node) => node.type === 'decl')
+            .map((node) => [node.prop, `${node.value}${node.important ? ' !important' : ''}`])
+          : [],
+      );
+      expect(values.get('transition-duration')).toBe('0s !important');
+      expect(values.get('animation-duration')).toBe('0s !important');
+    }
+  });
+
   it('uses a white album background for transparent Mermaid previews', () => {
     const backgrounds = new Map<string, string>();
     root.walkRules((rule) => {

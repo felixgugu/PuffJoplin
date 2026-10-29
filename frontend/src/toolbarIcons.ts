@@ -33,6 +33,8 @@ export const TOOLBAR_ICON_FILE_BY_NAME = {
   table: 'table',
   'format-table': 'table-list-solid-full',
   gallery: 'images',
+  'mermaid-config': 'sliders',
+  'source-word-wrap': 'text-width',
   undo: 'rotate-left',
   redo: 'rotate-right',
   'page-prev': 'arrow-up',

@@ -53,6 +53,7 @@ import {
   sourceColorCSSVariables,
   sourceTypographyCSSVariables,
 } from './editorPreferences';
+import { createLatestOnlyGuard } from './latestOnly';
 import GlobalSearch from './GlobalSearch';
 import { KEYBOARD_SHORTCUT_GROUPS } from './keyboardShortcuts';
 import {
@@ -304,6 +305,8 @@ export default function App() {
   const [current, setCurrent] = useState<Note>(emptyNote);
   const [editorNoteCache, setEditorNoteCache] = useState<Record<string, Note>>({});
   const [mountedEditorIDs, setMountedEditorIDs] = useState<Set<string>>(() => new Set());
+  const [readyEditorIDs, setReadyEditorIDs] = useState<Set<string>>(() => new Set());
+  const switchGuard = useMemo(() => createLatestOnlyGuard(), []);
   const [editorTabs, setEditorTabs] = useState<EditorTabsState>(
     () => loadEditorTabs(localStorage.getItem(EDITOR_TABS_KEY)),
   );
@@ -845,6 +848,10 @@ export default function App() {
       if (![...forgotten].some((id) => mounted.has(id))) return mounted;
       return new Set([...mounted].filter((id) => !forgotten.has(id)));
     });
+    setReadyEditorIDs((ready) => {
+      if (![...forgotten].some((id) => ready.has(id))) return ready;
+      return new Set([...ready].filter((id) => !forgotten.has(id)));
+    });
   }, []);
 
   const mountEditorNote = useCallback((id: string) => {
@@ -856,6 +863,23 @@ export default function App() {
       return next;
     });
   }, []);
+
+  const markEditorReady = useCallback((id: string) => {
+    if (!id) return;
+    setReadyEditorIDs((ready) => {
+      if (ready.has(id)) return ready;
+      const next = new Set(ready);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Mounting a Vditor instance is the expensive part of switching notes, so
+  // warm it up as soon as the pointer or keyboard focus lands on a tab.
+  const prewarmEditor = useCallback((id: string) => {
+    if (!id || !editorNoteCacheRef.current[id]) return;
+    mountEditorNote(id);
+  }, [mountEditorNote]);
 
   const refreshTaxonomy = useCallback(async () => {
     const [nextNotebooks, nextTags] = await Promise.all([api.listNotebooks(), api.listTags()]);
@@ -1163,12 +1187,13 @@ export default function App() {
 
   const selectNote = useCallback(async (id: string, mode: 'open' | 'activate' = 'open') => {
     if (!id || currentRef.current.id === id) return;
+    const requestID = switchGuard.begin();
     if (currentRef.current.id && currentRef.current.id !== id) {
       cacheEditorNote(currentRef.current);
     }
     if (currentRef.current.id && currentRef.current.id !== id && dirtyRef.current) {
       const saved = await saveCurrent();
-      if (!saved) return;
+      if (!saved || !switchGuard.isCurrent(requestID)) return;
     }
     const tabs = editorTabsRef.current;
     const tabIsOpen = tabs.activeID === id ||
@@ -1179,11 +1204,13 @@ export default function App() {
       try {
         note = await api.getNote(id);
       } catch (error) {
+        if (!switchGuard.isCurrent(requestID)) return;
         setEditorTabs((state) => removeNoteFromEditorTabs(state, id));
         forgetEditorNotes([id]);
         notify(`無法開啟筆記：${errorMessage(error)}`);
         return;
       }
+      if (!switchGuard.isCurrent(requestID)) return;
     }
     cacheEditorNote(note);
     mountEditorNote(note.id);
@@ -1194,7 +1221,7 @@ export default function App() {
     setSaveState('saved');
     setExportMenuOpen(false);
     setAttachmentMenuOpen(false);
-  }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent]);
+  }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent, switchGuard]);
 
   const openDashboardNote = useCallback(async (noteID: string) => {
     setView({ kind: 'all' });
@@ -1224,22 +1251,25 @@ export default function App() {
 
   const activateEditorTab = useCallback(async (id: string, cacheOutgoing = true) => {
     if (!id || currentRef.current.id === id) return;
+    const requestID = switchGuard.begin();
     const outgoing = currentRef.current;
     if (cacheOutgoing && outgoing.id) cacheEditorNote(outgoing);
     if (cacheOutgoing && outgoing.id && dirtyRef.current) {
       const saved = await saveCurrent();
-      if (!saved) return;
+      if (!saved || !switchGuard.isCurrent(requestID)) return;
     }
     let note = editorNoteCacheRef.current[id];
     if (!note) {
       try {
         note = await api.getNote(id);
       } catch (error) {
+        if (!switchGuard.isCurrent(requestID)) return;
         setEditorTabs((tabs) => removeNoteFromEditorTabs(tabs, id));
         forgetEditorNotes([id]);
         notify(`無法開啟筆記：${errorMessage(error)}`);
         return;
       }
+      if (!switchGuard.isCurrent(requestID)) return;
     }
     cacheEditorNote(note);
     mountEditorNote(id);
@@ -1248,7 +1278,7 @@ export default function App() {
     setSaveState('saved');
     setExportMenuOpen(false);
     setAttachmentMenuOpen(false);
-  }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent]);
+  }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent, switchGuard]);
 
   const toggleOpenTabPin = useCallback((id: string) => {
     setEditorTabs((tabs) => toggleEditorTabPin(tabs, id));
@@ -2381,6 +2411,19 @@ export default function App() {
       return Object.keys(next).length === Object.keys(cache).length ? cache : next;
     });
   }, [current.id, openEditorIDsKey]);
+
+  // Safety net: never leave the editor area covered by the loading skeleton
+  // if a Vditor instance fails to report readiness.
+  useEffect(() => {
+    const timers: number[] = [];
+    for (const id of mountedEditorIDs) {
+      if (readyEditorIDs.has(id)) continue;
+      timers.push(window.setTimeout(() => markEditorReady(id), 2000));
+    }
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [markEditorReady, mountedEditorIDs, readyEditorIDs]);
   const notebookDialogParentPath = useMemo(
     () => notebookDialog?.parentId ? notebookPath(notebooks, notebookDialog.parentId) : '',
     [notebookDialog?.parentId, notebooks],
@@ -3238,6 +3281,7 @@ export default function App() {
             onActivate={(id) => void activateEditorTab(id)}
             onTogglePin={toggleOpenTabPin}
             onClose={(id) => void closeOpenTab(id)}
+            onIntent={prewarmEditor}
           />
         )}
         {current.id ? (
@@ -3360,6 +3404,8 @@ export default function App() {
                 .filter((tab) => mountedEditorIDs.has(tab.id))
                 .map((tab) => {
                   const isActive = tab.id === current.id;
+                  const isReady = readyEditorIDs.has(tab.id);
+                  const isVisible = isActive && isReady;
                   const note = isActive ? current : editorNoteCache[tab.id];
                   if (!note?.id) {
                     return (
@@ -3374,10 +3420,10 @@ export default function App() {
                   }
                   return (
                     <div
-                      className={`editor-pane ${isActive ? 'active' : ''}`}
+                      className={`editor-pane ${isVisible ? 'active' : ''}`}
                       key={tab.id}
-                      aria-hidden={!isActive}
-                      inert={!isActive}
+                      aria-hidden={!isVisible}
+                      inert={!isVisible}
                     >
                       <VditorEditor
                         ref={isActive ? editorRef : undefined}
@@ -3393,6 +3439,10 @@ export default function App() {
                         resources={note.resources}
                         theme={theme}
                         showSourceLineNumbers={editorPreferences.showSourceLineNumbers}
+                        sourceWordWrap={editorPreferences.sourceWordWrap}
+                        onSourceWordWrapChange={(sourceWordWrap) =>
+                          setEditorPreferences((current) => ({ ...current, sourceWordWrap }))}
+                        onReady={() => markEditorReady(tab.id)}
                         onChange={(body) => {
                           if (currentRef.current.id === tab.id) updateDraft({ body });
                         }}
@@ -3408,6 +3458,14 @@ export default function App() {
                     </div>
                   );
                 })}
+              {current.id && mountedEditorIDs.has(current.id) &&
+                !readyEditorIDs.has(current.id) && (
+                  <div className="editor-pane active editor-pane-skeleton" aria-hidden="true">
+                    <div className="editor-pane-loading">
+                      {`正在開啟「${current.title || '未命名筆記'}」…`}
+                    </div>
+                  </div>
+                )}
             </div>
 
             <footer className="editor-footer">

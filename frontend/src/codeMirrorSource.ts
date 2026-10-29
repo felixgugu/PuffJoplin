@@ -221,7 +221,8 @@ const editorTheme = EditorView.theme({
   },
   '.cm-gutters': {
     border: 'none',
-    backgroundColor: 'transparent',
+    backgroundColor: 'var(--editor-surface)',
+    backgroundImage: 'linear-gradient(var(--source-background), var(--source-background))',
     color: 'var(--source-gutter)',
     userSelect: 'none',
   },
@@ -310,6 +311,7 @@ export interface CodeMirrorSourceOptions {
   textarea: HTMLTextAreaElement;
   value: string;
   showLineNumbers: boolean;
+  wordWrap?: boolean;
   onChange: (markdown: string) => void;
   onBlur: () => void;
   onScroll: () => void;
@@ -330,6 +332,7 @@ export class CodeMirrorSource {
   private readonly onLineActivate?: (line: CodeMirrorLineActivation | null) => void;
   private readonly onOutlineChange?: CodeMirrorSourceOptions['onOutlineChange'];
   private readonly lineNumbersCompartment = new Compartment();
+  private readonly wordWrapCompartment = new Compartment();
   private outlineHeadings: readonly SourceHeading[] = [];
   private outlineTimer: number | null = null;
   private applyingExternal = false;
@@ -369,7 +372,9 @@ export class CodeMirrorSource {
           this.lineNumbersCompartment.of(options.showLineNumbers ? lineNumbers() : []),
           markdown(),
           syntaxHighlighting(markdownHighlightStyle),
-          EditorView.lineWrapping,
+          this.wordWrapCompartment.of(
+            options.wordWrap === false ? [] : EditorView.lineWrapping,
+          ),
           EditorState.allowMultipleSelections.of(true),
           placeholder('以 Markdown 開始書寫，或直接貼上圖片…'),
           EditorView.contentAttributes.of({
@@ -481,6 +486,15 @@ export class CodeMirrorSource {
     if (this.destroyed) return;
     this.view.dispatch({
       effects: this.lineNumbersCompartment.reconfigure(visible ? lineNumbers() : []),
+    });
+  }
+
+  setWordWrap(enabled: boolean) {
+    if (this.destroyed) return;
+    this.view.dispatch({
+      effects: this.wordWrapCompartment.reconfigure(
+        enabled ? EditorView.lineWrapping : [],
+      ),
     });
   }
 

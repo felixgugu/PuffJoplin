@@ -107,14 +107,21 @@
 | 原始碼全部收合按鈕 | `.vditor-toolbar` 的 `fold-all` | 在原始碼模式使用 CodeMirror 遞迴收合所有可折疊區段，包含巢狀節點；其他模式停用，快捷鍵為 `Ctrl+Alt+[`。 |
 | 原始碼全部展開按鈕 | `.vditor-toolbar` 的 `unfold-all` | 在原始碼模式使用 CodeMirror 展開所有已折疊區段；其他模式停用，快捷鍵為 `Ctrl+Alt+]`。 |
 | 格式化表格按鈕 | `.vditor-toolbar` 的 `format-table` | 在原始碼模式格式化游標所在的 Markdown 表格；有選取內容時批次格式化範圍內所有表格，其他模式停用。 |
+| 自動換行按鈕 | `.vditor-toolbar` 的 `source-word-wrap` | 在原始碼模式切換 CodeMirror 自動換行；狀態與設定視窗同步，其他模式停用。 |
 | 相簿按鈕 | `.vditor-toolbar` 的 `gallery` | 在任何編輯模式開啟目前筆記的圖片與 Mermaid 畫廊；沒有媒體時顯示提示。 |
+| Mermaid 設定按鈕 | `.vditor-toolbar` 的 `mermaid-config` | 開啟 Mermaid 設定 Dialog，產生可貼進 mermaid 區塊最前面的設定文字。 |
+| Mermaid 設定 Dialog | `.mermaid-config-dialog` | 調整主題、字級、顏色、間距與輸出格式；按「複製」寫入剪貼簿後關閉。 |
+| Mermaid 設定輸出預覽 | `.mermaid-config-output` | 顯示目前選擇的 `%%{init}%%`、frontmatter 或 JSON 設定文字。 |
+| Mermaid 設定複製按鈕 | `.mermaid-config-dialog` 底部列的「複製」 | 將設定文字寫入系統剪貼簿，成功後關閉 Dialog。 |
 | 文字顏色按鈕 | `.vditor-toolbar` 的 `text-color` | 開啟 16 色文字顏色面板。 |
 | 文字顏色面板 | `.editor-text-color-palette` | 16 色色盤與「恢復預設色」操作。 |
 | 顏色色票 | `.text-color-swatch` | 單一常用文字顏色按鈕。 |
 | 分割預覽把手 | `.puff-preview-splitter` | Both 模式左右編輯／預覽的垂直拖曳分隔線。 |
-| Vditor 自訂捲軸 | `.puff-editor-scrollbar` | 編輯區與預覽區的 overlay 垂直捲軸軌道。 |
+| Vditor 自訂捲軸 | `.puff-editor-scrollbar` | 編輯區與預覽區的 overlay 垂直／水平捲軸軌道。 |
+| Vditor 水平捲軸 | `.puff-editor-scrollbar.is-horizontal` | 內容超出寬度（例如原始碼關閉自動換行）時顯示的水平拖曳軸。 |
 | Vditor 捲軸拇指 | `.puff-editor-scrollbar-thumb` | 最短 52px 的自訂捲軸拖曳把手。 |
 | 筆記內容區 | `.vditor-content` | IR／所見即所得由 Vditor 顯示，原始碼由 CodeMirror 顯示的共用書寫區域。 |
+| 筆記載入佔位 | `.editor-pane-skeleton`、`.editor-pane-loading` | 首次開啟或切換筆記時覆蓋初始化中的編輯器，避免內容閃爍。 |
 | **筆記內搜尋面板** | `.editor-find-panel` | 筆記編輯區右上方的搜尋與取代浮動面板，支援 CodeMirror 與 Vditor 模式。 |
 | 搜尋列 | `.editor-find-row`、`.editor-find-field` | 搜尋字串、符合數、大小寫、全字匹配與結果導覽。 |
 | 取代列 | `.editor-find-row.replace-row` | 取代文字、取代目前與全部取代。 |
@@ -173,6 +180,7 @@
 | PDF 裝飾開關 | `.pdf-settings-toggles` | 分別控制版權宣告頁尾與浮水印，預設為頁尾開啟、浮水印關閉。 |
 | PDF 浮水印 | `.pdf-watermark-layer` | 使用設定文字與匯出日期產生透明 SVG pattern；尺寸、字級、透明度與旋轉角度均可調。 |
 | 原始碼行號開關 | `.source-lines-field`、`.appearance-toggle` | 編輯分頁中控制 CodeMirror 原始碼行號與折疊控制的 Fluent 切換開關。 |
+| 原始碼自動換行開關 | `.source-wrap-field`、`.appearance-toggle` | 編輯分頁中控制 CodeMirror 原始碼是否自動換行；與工具列的自動換行按鈕同步。 |
 | 鍵盤快捷鍵清單 | `.settings-shortcuts` | 設定頁中的唯讀快捷鍵參考，依應用程式、搜尋、格式化、編輯器與原始碼操作分組。 |
 | 資料與儲存分頁 | `.settings-data` | 將匯入功能與本機儲存／Markdown 匯出分成獨立功能區。 |
 | 資源清理區塊 | `.settings-resource-cleanup` | 清理一般筆記未引用的資料庫資源與本機孤兒檔，不處理直接管理筆記本的外部檔案。 |

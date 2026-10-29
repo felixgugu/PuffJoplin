@@ -46,6 +46,7 @@ export interface EditorPreferences {
   version: 2;
   defaultMode: EditorMode;
   showSourceLineNumbers: boolean;
+  sourceWordWrap: boolean;
   customSourceAppearance: boolean;
   sourceTypography: SourceEditorTypography;
   sourceAppearance: {
@@ -140,6 +141,7 @@ export function defaultEditorPreferences(): EditorPreferences {
     version: 2,
     defaultMode: 'sv',
     showSourceLineNumbers: true,
+    sourceWordWrap: true,
     customSourceAppearance: false,
     sourceTypography: defaultSourceEditorTypography(),
     sourceAppearance: {
@@ -317,6 +319,7 @@ export function parseEditorPreferences(
     showSourceLineNumbers: typeof parsed.showSourceLineNumbers === 'boolean'
       ? parsed.showSourceLineNumbers
       : parseShowSourceLineNumbers(legacyLineNumbers),
+    sourceWordWrap: parsed.sourceWordWrap !== false,
     customSourceAppearance: parsed.customSourceAppearance === true,
     sourceTypography: normalizeSourceTypography(parsed.sourceTypography, legacyTypography),
     sourceAppearance: {

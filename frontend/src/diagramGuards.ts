@@ -17,6 +17,44 @@ type DiagramWindow = Window & {
   mermaid?: MermaidLibrary;
 };
 
+const diagramRenderingClass = 'puff-diagram-rendering';
+let diagramRenderDepth = 0;
+
+/**
+ * Diagram libraries build a temporary DOM subtree to measure their own labels.
+ * App-wide transitions (for example the reduced-motion rule) make the browser
+ * report those labels in the middle of a transition, which turns into wildly
+ * oversized layouts, so every render runs with transitions and animations off.
+ */
+function enterDiagramRender(): (() => void) | null {
+  const root = typeof document === 'undefined' ? undefined : document.documentElement;
+  if (!root) return null;
+  diagramRenderDepth += 1;
+  root.classList.add(diagramRenderingClass);
+  return () => {
+    diagramRenderDepth = Math.max(0, diagramRenderDepth - 1);
+    if (diagramRenderDepth === 0) root.classList.remove(diagramRenderingClass);
+  };
+}
+
+async function withoutDiagramTransitions<T>(run: () => Promise<T>): Promise<T> {
+  const release = enterDiagramRender();
+  try {
+    return await run();
+  } finally {
+    release?.();
+  }
+}
+
+function withoutDiagramTransitionsSync<T>(run: () => T): T {
+  const release = enterDiagramRender();
+  try {
+    return run();
+  } finally {
+    release?.();
+  }
+}
+
 function escapeHTML(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -57,13 +95,13 @@ export function guardFlowchartLibrary(library: FlowchartLibrary | undefined): bo
     if (!drawing || typeof originalDraw !== 'function') {
       return { drawSVG: (element) => renderFlowchartFallback(element, code) };
     }
-    drawing.drawSVG = (element: HTMLElement) => {
+    drawing.drawSVG = (element: HTMLElement) => withoutDiagramTransitionsSync(() => {
       try {
         originalDraw.call(drawing, element);
       } catch {
         renderFlowchartFallback(element, code);
       }
-    };
+    });
     return drawing;
   };
   library.__puffJoplinGuarded = true;
@@ -73,14 +111,13 @@ export function guardFlowchartLibrary(library: FlowchartLibrary | undefined): bo
 export function guardMermaidLibrary(library: MermaidLibrary | undefined): boolean {
   if (!library || library.__puffJoplinGuarded) return false;
   const originalRender = library.render;
-  library.render = (id: string, code: string) => {
+  library.render = (id: string, code: string) => withoutDiagramTransitions(async () => {
     try {
-      const result = originalRender.call(library, id, code);
-      return Promise.resolve(result).catch(() => ({ svg: fallbackHTML('Mermaid', code) }));
+      return await originalRender.call(library, id, code);
     } catch {
-      return Promise.resolve({ svg: fallbackHTML('Mermaid', code) });
+      return { svg: fallbackHTML('Mermaid', code) };
     }
-  };
+  });
   library.__puffJoplinGuarded = true;
   return true;
 }

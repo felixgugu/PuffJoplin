@@ -75,4 +75,36 @@ describe('diagram error guards', () => {
     expect(result.svg).toContain('flowchart TD');
     expect(guardMermaidLibrary(library)).toBe(false);
   });
+
+  it('disables app-wide transitions while Mermaid renders and restores them after', async () => {
+    const classList = { add: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('document', { documentElement: { classList } });
+    const library: MermaidLibrary = {
+      render: vi.fn(() => new Promise<{ svg: string }>((resolve) => {
+        setTimeout(() => resolve({ svg: '<svg></svg>' }), 0);
+      })),
+    };
+    guardMermaidLibrary(library);
+
+    const pending = library.render('diagram', 'flowchart TD');
+    expect(classList.add).toHaveBeenCalledWith('puff-diagram-rendering');
+    expect(classList.remove).not.toHaveBeenCalled();
+
+    await expect(pending).resolves.toEqual({ svg: '<svg></svg>' });
+    expect(classList.remove).toHaveBeenCalledWith('puff-diagram-rendering');
+  });
+
+  it('restores transitions when Mermaid rendering fails', async () => {
+    const classList = { add: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('document', { documentElement: { classList } });
+    const library: MermaidLibrary = {
+      render: vi.fn(() => Promise.reject(new Error('incomplete mermaid'))),
+    };
+    guardMermaidLibrary(library);
+
+    const result = await library.render('diagram', 'flowchart TD');
+
+    expect(result.svg).toContain('Mermaid 語法尚未完成或無法解析');
+    expect(classList.remove).toHaveBeenCalledWith('puff-diagram-rendering');
+  });
 });

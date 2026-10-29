@@ -285,6 +285,21 @@ export default function EditorSettings({
               <span>在原始碼模式顯示行號與折疊控制</span>
             </label>
           </div>
+          <div className="appearance-field source-wrap-field">
+            <span>自動換行</span>
+            <label className="appearance-toggle">
+              <input
+                type="checkbox"
+                checked={preferences.sourceWordWrap}
+                onChange={(event) => onChange({
+                  ...preferences,
+                  sourceWordWrap: event.target.checked,
+                })}
+              />
+              <span className="appearance-toggle-track" aria-hidden="true" />
+              <span>原始碼超出編輯區寬度時自動換行</span>
+            </label>
+          </div>
         </div>
       </section>
 

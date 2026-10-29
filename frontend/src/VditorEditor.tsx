@@ -33,6 +33,8 @@ import {
   type SourcePreviewTarget,
 } from './sourceLineTarget';
 import TextColorPalette from './TextColorPalette';
+import MermaidConfigDialog from './MermaidConfigDialog';
+import { loadMermaidConfigState, type MermaidConfigState } from './mermaidConfig';
 import { toolbarIcon, type ToolbarIconName } from './toolbarIcons';
 import { EditorViewportController } from './editorViewportController';
 import { useConfirmDialog } from './useConfirmDialog';
@@ -133,12 +135,19 @@ export function syncEditorModeButtons(editor: Vditor) {
     button.setAttribute('aria-pressed', String(active));
   }
   const sourceMode = mode === 'sv';
-  for (const name of ['fold-all', 'unfold-all', 'format-table']) {
+  for (const name of ['fold-all', 'unfold-all', 'format-table', 'source-word-wrap']) {
     const button = editorModeButton(editor, name);
     if (!button) continue;
     button.disabled = !sourceMode;
     button.setAttribute('aria-disabled', String(!sourceMode));
   }
+}
+
+export function syncSourceWordWrapButton(editor: Vditor, enabled: boolean) {
+  const button = editorModeButton(editor, 'source-word-wrap');
+  if (!button) return;
+  button.classList.toggle('vditor-menu--current', enabled);
+  button.setAttribute('aria-pressed', String(enabled));
 }
 
 function activateEditorMode(editor: Vditor, mode: EditorMode) {
@@ -202,10 +211,13 @@ interface VditorEditorProps {
   resources: Resource[];
   theme: 'light' | 'dark';
   showSourceLineNumbers: boolean;
+  sourceWordWrap: boolean;
   onChange: (value: string) => void;
   onBlur: () => void;
   onModeChange: (mode: EditorMode) => void;
   onPreviewModeChange: (mode: EditorPreviewMode) => void;
+  onSourceWordWrapChange: (value: boolean) => void;
+  onReady?: () => void;
 }
 
 export interface VditorEditorHandle {
@@ -224,10 +236,13 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   resources,
   theme,
   showSourceLineNumbers,
+  sourceWordWrap,
   onChange,
   onBlur,
   onModeChange,
   onPreviewModeChange,
+  onSourceWordWrapChange,
+  onReady,
 }, ref) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -238,10 +253,13 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const initialPreviewModeRef = useRef(initialPreviewMode);
   const themeRef = useRef(theme);
   const showSourceLineNumbersRef = useRef(showSourceLineNumbers);
+  const sourceWordWrapRef = useRef(sourceWordWrap);
+  const onSourceWordWrapChangeRef = useRef(onSourceWordWrapChange);
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
   const onModeChangeRef = useRef(onModeChange);
   const onPreviewModeChangeRef = useRef(onPreviewModeChange);
+  const onReadyRef = useRef(onReady);
   const pastingRef = useRef(false);
   const storageKindRef = useRef(storageKind);
   const resourcesRef = useRef(resources);
@@ -268,6 +286,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   } = useConfirmDialog();
   const [textColorPalette, setTextColorPalette] = useState<{ x: number; y: number } | null>(null);
   const [textColor, setTextColor] = useState(TEXT_COLORS[10].value);
+  const [mermaidConfigDialog, setMermaidConfigDialog] = useState<MermaidConfigState | null>(null);
   const findQueryInputRef = useRef<HTMLInputElement | null>(null);
   const findReplacementInputRef = useRef<HTMLInputElement | null>(null);
   const findActiveIndexRef = useRef(0);
@@ -282,6 +301,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const lastDomTextRangeRef = useRef<Range | null>(null);
   const textColorSelectionRef = useRef<TextColorSelection | null>(null);
   const openTextColorPaletteRef = useRef<(anchor: HTMLElement) => void>(() => undefined);
+  const openMermaidConfigDialogRef = useRef<() => void>(() => undefined);
   const refreshTextColorMarkersRef = useRef<() => void>(() => undefined);
   const refreshEditorViewportRef = useRef<() => void>(() => undefined);
   const sourceEditorRef = useRef<CodeMirrorSource | null>(null);
@@ -291,10 +311,13 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
 
   themeRef.current = theme;
   showSourceLineNumbersRef.current = showSourceLineNumbers;
+  sourceWordWrapRef.current = sourceWordWrap;
+  onSourceWordWrapChangeRef.current = onSourceWordWrapChange;
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
   onModeChangeRef.current = onModeChange;
   onPreviewModeChangeRef.current = onPreviewModeChange;
+  onReadyRef.current = onReady;
   storageKindRef.current = storageKind;
   resourcesRef.current = resources;
   valueRef.current = value;
@@ -684,6 +707,12 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   }, []);
   openTextColorPaletteRef.current = openTextColorPalette;
 
+  const copyMermaidConfig = useCallback(async (text: string) => {
+    await api.copyText(text);
+    editorRef.current?.tip('已複製 Mermaid 設定', 2500);
+  }, []);
+  openMermaidConfigDialogRef.current = () => setMermaidConfigDialog(loadMermaidConfigState());
+
   const applyTextColor = useCallback((color: string | null) => {
     const editor = editorRef.current;
     const selection = textColorSelectionRef.current;
@@ -1044,6 +1073,12 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           tipPosition: 'n',
           click: () => openSourceGalleryRef.current(),
         },
+        {
+          ...toolbarIconItem('mermaid-config'),
+          tip: 'Mermaid 設定（複製設定值）',
+          tipPosition: 'n',
+          click: () => openMermaidConfigDialogRef.current(),
+        },
         '|',
         toolbarIconItem('undo'),
         toolbarIconItem('redo'),
@@ -1082,6 +1117,15 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           tipPosition: 'n',
           click: () => {
             if (editor.getCurrentMode() === 'sv') sourceEditorRef.current?.unfoldAll();
+          },
+        },
+        {
+          ...toolbarIconItem('source-word-wrap'),
+          tip: '自動換行（原始碼模式）',
+          tipPosition: 'n',
+          click: () => {
+            if (editor.getCurrentMode() !== 'sv') return;
+            onSourceWordWrapChangeRef.current(!sourceWordWrapRef.current);
           },
         },
         '|',
@@ -1177,6 +1221,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         onModeChangeRef.current(editor.getCurrentMode());
         onPreviewModeChangeRef.current(currentEditorPreviewMode(editor));
         syncEditorModeButtons(editor);
+        syncSourceWordWrapButton(editor, sourceWordWrapRef.current);
         applyEditorTheme(editor, themeRef.current);
         const currentValue = toEditorMarkdown(valueRef.current, resourcesRef.current);
         if (currentValue !== toEditorMarkdown(initialValueRef.current, resourcesRef.current)) {
@@ -1194,6 +1239,11 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         refreshTextColorMarkersRef.current();
         refreshEditorViewportRef.current();
         refreshSourceEditorRef.current();
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            if (!disposed) onReadyRef.current?.();
+          });
+        });
       },
       input: (markdown) => {
         if (!disposed && readyRef.current) {
@@ -1341,6 +1391,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           textarea: sourceTextarea,
           value: sourceTextarea.value,
           showLineNumbers: showSourceLineNumbersRef.current,
+          wordWrap: sourceWordWrapRef.current,
           onOutlineChange: (headings, activeHeading) => {
             sourceOutline?.setState(headings, activeHeading);
           },
@@ -1370,6 +1421,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           },
           onLineActivate: handleSourceLineActivate,
         });
+        refreshEditorViewportRef.current();
       } catch (error) {
         sourceOutline?.destroy();
         sourceOutline = null;
@@ -1687,7 +1739,15 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
 
   useEffect(() => {
     sourceEditorRef.current?.setShowLineNumbers(showSourceLineNumbers);
+    refreshEditorViewportRef.current();
   }, [showSourceLineNumbers]);
+
+  useEffect(() => {
+    sourceEditorRef.current?.setWordWrap(sourceWordWrap);
+    refreshEditorViewportRef.current();
+    const editor = editorRef.current;
+    if (editor) syncSourceWordWrapButton(editor, sourceWordWrap);
+  }, [sourceWordWrap]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1704,6 +1764,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     closeFindPanel();
     setMediaContext(null);
     setTextColorPalette(null);
+    setMermaidConfigDialog(null);
     clearSearchHighlights();
     document.body.classList.remove(
       'editor-splitter-dragging',
@@ -1820,6 +1881,13 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           onSelect={(color) => applyTextColor(color)}
           onReset={() => applyTextColor(null)}
           onClose={() => setTextColorPalette(null)}
+        />
+      )}
+      {mermaidConfigDialog && (
+        <MermaidConfigDialog
+          initial={mermaidConfigDialog}
+          onClose={() => setMermaidConfigDialog(null)}
+          onCopy={copyMermaidConfig}
         />
       )}
     </div>

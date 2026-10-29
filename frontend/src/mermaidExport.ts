@@ -104,10 +104,107 @@ function svgDimensions(svg: SVGSVGElement): { width: number; height: number } {
   throw new Error('Mermaid 圖表沒有有效的尺寸');
 }
 
+const labelFontFamily = '"Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", sans-serif';
+let measureCanvas: HTMLCanvasElement | null | undefined;
+
+function measureTextWidth(text: string, font: string): number {
+  if (measureCanvas === undefined) {
+    measureCanvas = typeof document === 'undefined' ? null : document.createElement('canvas');
+  }
+  const context = measureCanvas?.getContext?.('2d') ?? null;
+  if (!context) return 0;
+  context.font = font;
+  return context.measureText(text).width;
+}
+
+/**
+ * ForeignObject labels carry their line breaks as <br> elements and their
+ * styling as inline CSS. Converting them to SVG text has to keep those breaks,
+ * otherwise multi-line labels collapse into one long line.
+ */
+export function splitMermaidLabelLines(element: Element): string[] {
+  const lines: string[] = [];
+  let current = '';
+  const flush = () => {
+    const line = current.replace(/\s+/g, ' ').trim();
+    if (line) lines.push(line);
+    current = '';
+  };
+  const walk = (node: Node) => {
+    if (node.nodeType === 3) {
+      current += node.nodeValue ?? '';
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const tag = (node as Element).tagName.toLowerCase();
+    if (tag === 'br') {
+      flush();
+      return;
+    }
+    const block = tag === 'p' || tag === 'div';
+    if (block) flush();
+    for (const child of Array.from(node.childNodes)) walk(child);
+    if (block) flush();
+  };
+  for (const child of Array.from(element.childNodes)) walk(child);
+  flush();
+  return lines;
+}
+
+/**
+ * ForeignObject labels are laid out by the browser: explicit <br> elements
+ * become line breaks and long lines wrap at the label width. Exporting to SVG
+ * text has to reproduce both, otherwise labels overflow their nodes.
+ */
+export function wrapMermaidLabelLine(
+  line: string,
+  maxWidth: number,
+  measure: (text: string) => number,
+): string[] {
+  if (!line || maxWidth <= 0 || measure(line) <= maxWidth) return [line];
+  const words = line.split(/(\s+)/).filter((word) => word.length > 0);
+  const lines: string[] = [];
+  let current = '';
+  const flush = () => {
+    const value = current.trim();
+    if (value) lines.push(value);
+    current = '';
+  };
+  for (const word of words) {
+    if (!current && !word.trim()) continue;
+    if (current && measure(current + word) > maxWidth) flush();
+    if (measure(word) > maxWidth) {
+      for (const char of Array.from(word)) {
+        if (current && measure(current + char) > maxWidth) flush();
+        if (!current && !char.trim()) continue;
+        current += char;
+      }
+    } else {
+      current += word;
+    }
+  }
+  flush();
+  return lines.length > 0 ? lines : [line];
+}
+
+function svgLabelMetrics(svg: SVGSVGElement): { fontSize: number; fill: string } {
+  const style = svg.querySelector('style')?.textContent || '';
+  const fontSize = Number.parseFloat(style.match(/font-size:\s*([\d.]+)px/)?.[1] || '');
+  const fill = style.match(/fill:\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\))/)?.[1] || '#333333';
+  return {
+    fontSize: Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 14,
+    fill,
+  };
+}
+
 function replaceForeignObjectLabels(svg: SVGSVGElement) {
+  const { fontSize, fill } = svgLabelMetrics(svg);
+  const lineHeight = Math.round(fontSize * 1.4);
+  const font = `${fontSize}px ${labelFontFamily}`;
+  const measure = (text: string) => measureTextWidth(text, font);
   for (const foreignObject of Array.from(svg.querySelectorAll('foreignObject'))) {
-    const label = (foreignObject.textContent || '').replace(/\s+/g, ' ').trim();
-    if (!label) {
+    const sourceLines = splitMermaidLabelLines(foreignObject);
+    if (sourceLines.length === 0) {
       foreignObject.remove();
       continue;
     }
@@ -115,16 +212,28 @@ function replaceForeignObjectLabels(svg: SVGSVGElement) {
     const y = Number.parseFloat(foreignObject.getAttribute('y') || '0');
     const width = Number.parseFloat(foreignObject.getAttribute('width') || '0');
     const height = Number.parseFloat(foreignObject.getAttribute('height') || '0');
-    const text = svg.ownerDocument.createElementNS(svgNamespace, 'text');
-    text.setAttribute('x', String((Number.isFinite(x) ? x : 0) + (Number.isFinite(width) ? width : 0) / 2));
-    text.setAttribute('y', String((Number.isFinite(y) ? y : 0) + (Number.isFinite(height) ? height : 0) / 2));
-    text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('dominant-baseline', 'middle');
-    text.setAttribute('font-family', '"Microsoft JhengHei UI", "Segoe UI", sans-serif');
-    text.setAttribute('font-size', '14px');
-    text.setAttribute('fill', '#333333');
-    text.textContent = label;
-    foreignObject.replaceWith(text);
+    const maxWidth = Number.isFinite(width) && width > 0 ? width + 8 : 0;
+    const lines = sourceLines.flatMap((line) => wrapMermaidLabelLine(line, maxWidth, measure));
+    const centerX = (Number.isFinite(x) ? x : 0) + (Number.isFinite(width) ? width : 0) / 2;
+    const centerY = (Number.isFinite(y) ? y : 0) + (Number.isFinite(height) ? height : 0) / 2;
+    const firstLineY = centerY - ((lines.length - 1) * lineHeight) / 2;
+    for (const [index, line] of lines.entries()) {
+      const text = svg.ownerDocument.createElementNS(svgNamespace, 'text');
+      text.setAttribute('x', String(centerX));
+      text.setAttribute('y', String(firstLineY + index * lineHeight));
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'middle');
+      text.setAttribute('font-family', labelFontFamily);
+      text.setAttribute('font-size', `${fontSize}px`);
+      text.setAttribute('font-weight', '400');
+      // Mermaid's classDef rules put an !important stroke on the label group,
+      // which would outline the converted text in the node accent colour.
+      text.setAttribute('style', `fill: ${fill}; font-weight: 400; stroke: none;`);
+      text.setAttribute('fill', fill);
+      text.textContent = line;
+      foreignObject.parentNode?.insertBefore(text, foreignObject);
+    }
+    foreignObject.remove();
   }
 }
 
@@ -139,6 +248,14 @@ function removeUnsafeSvgContent(svg: SVGSVGElement) {
       if (name.startsWith('on') || (name.endsWith('href') && value.startsWith('javascript:'))) {
         element.removeAttribute(attribute.name);
       }
+    }
+    // Canvas rasterizers (canvg) cannot parse !important inside style
+    // attributes and silently drop the whole declaration, which turns node
+    // fills into the inherited text colour. The flag carries no meaning in a
+    // standalone SVG file, so drop it.
+    const style = element.getAttribute('style');
+    if (style?.includes('!important')) {
+      element.setAttribute('style', style.replace(/\s*!\s*important\s*/gi, ' ').trim());
     }
   }
 }

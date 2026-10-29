@@ -2,7 +2,7 @@
 
 來源：https://github.com/FortAwesome/Font-Awesome/tree/7.x
 Font Awesome Free Classic Solid；下載日期 2026-10-25。
-32 個位置、32 個獨立 SVG，其中 30 個為 Font Awesome Free，2 個為依使用者截圖重畫的 mode-*。
+38 個位置、38 個獨立 SVG，其中 36 個為 Font Awesome Free，2 個為依使用者截圖重畫的 mode-*。
 
 ## 授權
 Font Awesome Free by Fonticons, Inc. https://fontawesome.com
@@ -28,5 +28,7 @@ sprite.svg 提供 symbol 集合；外部引用建議透過 HTTP 使用。
 | 向前插入 | arrow-up-long |
 | 向後插入 | arrow-down-long |
 | 大綱 | list |
+| Mermaid 設定 | sliders |
+| 自動換行 | text-width |
 
 向前／向後插入以向上／向下長箭頭圖示對應，表示在目前區塊之前／之後插入。

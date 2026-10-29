@@ -133,6 +133,7 @@ export const api = {
   copyResourceFileToClipboard: (resourceId: string) =>
     invoke<void>('CopyResourceFileToClipboard', resourceId),
   copyNoteFilePath: (noteId: string) => invoke<void>('CopyNoteFilePath', noteId),
+  copyText: (text: string) => invoke<void>('CopyTextToClipboard', text),
   revealNoteFile: (noteId: string) => invoke<void>('RevealNoteFile', noteId),
   openResource: (id: string) => invoke<void>('OpenResource', id),
   revealResource: (id: string) => invoke<void>('RevealResource', id),

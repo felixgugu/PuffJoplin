@@ -288,5 +288,21 @@
     "file": "svg/images.svg",
     "source": "依相片堆疊語意重畫",
     "origin": "custom"
+  },
+  {
+    "position": 37,
+    "label": "Mermaid 設定",
+    "icon": "sliders",
+    "file": "svg/sliders.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/sliders.svg",
+    "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 38,
+    "label": "自動換行",
+    "icon": "text-width",
+    "file": "svg/text-width.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/text-width.svg",
+    "origin": "Font Awesome Free Classic Solid"
   }
 ]

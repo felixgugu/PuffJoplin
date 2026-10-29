@@ -888,6 +888,17 @@ func (a *App) CopyNoteFilePath(noteID string) error {
 	return writeClipboardText(path)
 }
 
+// CopyTextToClipboard copies plain Unicode text through the native clipboard.
+func (a *App) CopyTextToClipboard(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return errors.New("沒有可複製的內容")
+	}
+	if len(text) > 1<<20 {
+		return errors.New("複製內容超過 1 MB")
+	}
+	return writeClipboardText(text)
+}
+
 func (a *App) RevealNoteFile(noteID string) error {
 	store, err := a.readyStore()
 	if err != nil {

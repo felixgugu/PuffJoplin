@@ -1063,6 +1063,7 @@ button:disabled {
   --surface-raised: rgba(255, 255, 255, 0.78);
   --surface-selected: rgba(255, 255, 255, 0.88);
   --surface-hover: rgba(255, 255, 255, 0.48);
+  --editor-surface: #fcfcfb;
   --line: rgba(0, 0, 0, 0.09);
   --line-soft: rgba(0, 0, 0, 0.055);
   --text: #1b1b1b;
@@ -1092,6 +1093,7 @@ button:disabled {
   --surface-raised: rgba(255, 255, 255, 0.085);
   --surface-selected: rgba(255, 255, 255, 0.115);
   --surface-hover: rgba(255, 255, 255, 0.075);
+  --editor-surface: #242423;
   --line: rgba(255, 255, 255, 0.095);
   --line-soft: rgba(255, 255, 255, 0.065);
   --text: #f5f5f5;
@@ -1983,6 +1985,13 @@ select:focus-visible {
   font-size: 0.9rem;
 }
 
+.editor-pane-skeleton {
+  z-index: 2;
+  visibility: visible;
+  background: var(--panel-strong);
+  pointer-events: none;
+}
+
 .vditor-editor-shell {
   position: relative;
   width: 100%;
@@ -2037,6 +2046,20 @@ select:focus-visible {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
 }
 
+.puff-editor-scrollbar.is-horizontal {
+  width: auto;
+  height: 14px;
+}
+
+.puff-editor-scrollbar.is-horizontal .puff-editor-scrollbar-thumb {
+  top: 3px;
+  left: 0;
+  width: auto;
+  height: 8px;
+  min-width: 52px;
+  min-height: 0;
+}
+
 .puff-editor-scrollbar:hover .puff-editor-scrollbar-thumb,
 .puff-editor-scrollbar.is-dragging .puff-editor-scrollbar-thumb {
   background: color-mix(in srgb, var(--accent) 72%, var(--muted));
@@ -2075,6 +2098,10 @@ body.editor-splitter-dragging,
 body.editor-scrollbar-dragging {
   cursor: col-resize;
   user-select: none;
+}
+
+body.editor-scrollbar-dragging-x {
+  cursor: row-resize;
 }
 
 .vditor-editor-host > .vditor {
@@ -2561,10 +2588,39 @@ body.editor-scrollbar-dragging {
   font-family: var(--font-family-code) !important;
 }
 
-.vditor-editor-host .vditor-reset pre {
+.vditor-editor-host .vditor-reset pre:not(.vditor-ir__preview) {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--bg);
+}
+
+/* Mermaid and flowchart build a temporary DOM subtree and measure their own
+   labels while rendering. App-wide transitions make those measurements race
+   the transition and produce enormous diagram layouts, so diagram renders run
+   with transitions and animations switched off. */
+.puff-diagram-rendering,
+.puff-diagram-rendering * {
+  transition: none !important;
+  animation: none !important;
+}
+
+.vditor-editor-host .vditor-reset .vditor-ir__preview,
+.vditor-editor-host .vditor-reset .language-mermaid {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.vditor-editor-host .vditor-reset .language-mermaid,
+.vditor-editor-host .vditor-reset .language-mermaid * {
+  font-family: var(--font-family-ui);
+}
+
+.vditor-editor-host .vditor-reset .language-mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
 }
 
 .vditor-editor-host .vditor-reset blockquote {
@@ -2601,6 +2657,194 @@ body.editor-scrollbar-dragging {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.mermaid-config-dialog {
+  display: flex;
+  width: min(760px, calc(100vw - 40px));
+  max-height: min(88vh, 900px);
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mermaid-config-dialog > header,
+.mermaid-config-dialog > footer {
+  flex: none;
+}
+
+.mermaid-config-dialog > header {
+  padding: 18px 22px 12px;
+}
+
+.mermaid-config-dialog > header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.mermaid-config-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  padding: 4px 22px 18px;
+  overflow-y: auto;
+}
+
+.mermaid-config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mermaid-config-section h3 {
+  margin: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.mermaid-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.mermaid-config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.mermaid-config-field input[type="number"] {
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.mermaid-config-field input[type="number"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.mermaid-config-colors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px;
+}
+
+.mermaid-config-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.mermaid-config-color-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.mermaid-config-color input[type="color"] {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mermaid-config-color input[type="text"] {
+  width: 86px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-family-code);
+  font-size: 0.74rem;
+}
+
+.mermaid-config-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+}
+
+.mermaid-config-hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.mermaid-config-formats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mermaid-config-format {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.mermaid-config-format[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mermaid-config-output {
+  max-height: var(--mermaid-output-height, 260px);
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  color: var(--text);
+  font-family: var(--font-family-code);
+  font-size: 0.74rem;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.mermaid-config-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.76rem;
+}
+
+.mermaid-config-dialog > footer {
+  justify-content: flex-end;
+}
+
+.mermaid-config-dialog > footer .mermaid-config-reset {
+  margin-right: auto;
+}
+
+.mermaid-config-dialog > footer button.primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .editor-footer {
@@ -3202,8 +3446,8 @@ body.editor-scrollbar-dragging {
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
     animation-iteration-count: 1 !important;
   }
 }
@@ -5827,6 +6071,10 @@ textarea {
 }
 
 .source-lines-field {
+  grid-column: 1 / -1;
+}
+
+.source-wrap-field {
   grid-column: 1 / -1;
 }
 
