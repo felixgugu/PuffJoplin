@@ -132,12 +132,17 @@
 | 目前搜尋結果 | `::highlight(puffjoplin-find-active)` | 目前導覽結果的強調色標記。 |
 | **圖稿右鍵選單** | `.editor-media-context-menu` | 本機圖片與 Mermaid 圖表的複製影像／檔案選單。 |
 | **筆記底部列** | `.editor-footer` | 編輯區最下方固定狀態列。 |
-| **標籤膠囊列** | `.note-tags`、`.tag-capsule-bar` | 筆記底部列中顯示目前標籤的單行區域；「Tag 區」統一稱為此名稱。 |
-| 標籤膠囊 | `.tag-capsule` | 顯示單一 `#標籤名稱` 的圓角膠囊。 |
-| 標籤溢出計數 | `.tag-capsule-count` | 無法容納時顯示的 `+N`。 |
-| 標籤管理選單 | `.tag-editor-popover` | 從標籤膠囊列向上展開的標籤清單。 |
+| **標籤膠囊列** | `.note-tags`、`.tag-capsule-bar` | 筆記底部列中顯示目前標籤的單行區域；整條列不是點擊區，個別膠囊才會開啟選單。 |
+| 標籤膠囊 | `.tag-capsule` | 顯示單一 `#標籤名稱` 的圓角膠囊；點擊開啟標籤管理選單並選取該標籤。 |
+| 標籤溢出計數 | `.tag-capsule-count` | 無法容納時顯示的 `+N`；點擊開啟標籤管理選單。 |
+| 標籤管理選單 | `.tag-editor-popover` | 從標籤膠囊列向上展開的標籤清單；選取標籤後在該列下方顯示含有此標籤的筆記。 |
 | 標籤管理列 | `.tag-editor-item` | 選單中的單一 `#Name` 與右側 `X`。 |
-| 新標籤輸入 | `.tag-editor-new input` | 標籤管理選單底部的「輸入新的標籤」。 |
+| 標籤選取按鈕 | `.tag-editor-select` | 標籤管理列中選取標籤的按鈕，會高亮目前選取項目。 |
+| 已選標籤 | `.tag-editor-item.is-selected` | 目前展開筆記清單的標籤列，使用強調色背景與文字。 |
+| 標籤筆記清單 | `.tag-editor-notes` | 已選標籤下方跨筆記本查詢的筆記清單。 |
+| 標籤筆記 | `.tag-editor-note` | 標籤筆記清單中的單篇筆記，點擊會切換到該筆記。 |
+| 標籤筆記狀態 | `.tag-editor-note-status` | 標籤筆記清單的載入中、無資料或筆數上限提示。 |
+| 新標籤輸入 | `.tag-editor-new input` | 標籤管理選單底部的「輸入新的標籤」；送出後焦點留在輸入框以便連續新增。 |
 | **附加資訊按鈕** | `.note-info-trigger` | 位於標籤膠囊列右側，開啟「筆記附加資訊 Dialog」。 |
 | 附件按鈕 | `.attachment-trigger` | 顯示「附件 N」，用來開啟附件清單。 |
 | 附件選單 | `.attachment-popover` | 向上展開的附件清單；每列可開啟或另存。 |

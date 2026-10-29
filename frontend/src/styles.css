@@ -1852,6 +1852,10 @@ select:focus-visible {
   background: var(--surface-hover);
 }
 
+.title-input:focus-visible {
+  outline: 0;
+}
+
 .editor-heading-actions {
   display: flex;
   flex: none;
@@ -2894,19 +2898,8 @@ body.editor-scrollbar-dragging-x {
   align-items: center;
   gap: 4px;
   overflow: hidden;
-  padding: 3px 7px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
+  padding: 3px 0;
   color: var(--text);
-  text-align: left;
-}
-
-.tag-capsule-bar:hover,
-.tag-capsule-bar:focus-visible,
-.tag-capsule-bar[aria-expanded="true"] {
-  border-color: var(--line-soft);
-  background: var(--surface-hover);
 }
 
 .tag-capsule,
@@ -2927,11 +2920,28 @@ body.editor-scrollbar-dragging-x {
   white-space: nowrap;
 }
 
+button.tag-capsule:hover,
+button.tag-capsule:focus-visible {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+  outline: 0;
+}
+
+button.tag-capsule.is-active {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .tag-capsule-count {
   padding-right: 7px;
   padding-left: 7px;
   background: var(--surface-raised);
   color: var(--muted);
+}
+
+button.tag-capsule-count:hover,
+button.tag-capsule-count:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text);
+  outline: 0;
 }
 
 .tag-capsule-empty {
@@ -2940,6 +2950,12 @@ body.editor-scrollbar-dragging-x {
   font-size: 0.8rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+button.tag-capsule-empty:hover,
+button.tag-capsule-empty:focus-visible {
+  color: var(--text);
+  outline: 0;
 }
 
 .tag-measure {
@@ -2961,7 +2977,7 @@ body.editor-scrollbar-dragging-x {
   left: 0;
   display: flex;
   width: min(360px, calc(100vw - 48px));
-  max-height: min(50vh, 420px);
+  max-height: min(60vh, 520px);
   flex-direction: column;
   padding: 5px;
   border: 1px solid var(--line);
@@ -2988,13 +3004,35 @@ body.editor-scrollbar-dragging-x {
   display: flex;
   min-height: 34px;
   align-items: center;
-  gap: 8px;
-  padding: 2px 4px 2px 9px;
+  gap: 2px;
+  padding: 1px 3px;
   border-radius: 6px;
 }
 
 .tag-editor-item:hover {
   background: var(--surface-hover);
+}
+
+.tag-editor-item.is-selected,
+.tag-editor-item.is-selected:hover {
+  background: var(--accent-soft);
+}
+
+.tag-editor-select {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 7px;
+  border-radius: 5px;
+  color: inherit;
+  text-align: left;
+}
+
+.tag-editor-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .tag-editor-name {
@@ -3005,6 +3043,58 @@ body.editor-scrollbar-dragging-x {
   font-size: 1rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tag-editor-item.is-selected .tag-editor-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tag-editor-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 1px 4px 6px 18px;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent-soft);
+}
+
+.tag-editor-note {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  color: var(--text);
+  text-align: left;
+}
+
+.tag-editor-note:hover,
+.tag-editor-note:focus-visible {
+  background: var(--surface-hover);
+  outline: 0;
+}
+
+.tag-editor-note-title {
+  overflow: hidden;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-editor-note-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-editor-note-status {
+  margin: 2px 0;
+  padding: 4px 7px;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .tag-editor-remove {

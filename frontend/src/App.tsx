@@ -335,7 +335,6 @@ export default function App() {
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [noteInfoDialogOpen, setNoteInfoDialogOpen] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<NoteExportAction | null>(null);
-  const [tagSaving, setTagSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [fatalError, setFatalError] = useState('');
   const [dashboardSnapshot, setDashboardSnapshot] = useState<DashboardSnapshot | null>(null);
@@ -503,7 +502,8 @@ export default function App() {
   const pendingSaveRef = useRef(false);
   const listRequestRef = useRef(0);
   const dashboardRequestRef = useRef(0);
-  const lastListFilterRef = useRef('');
+  const tagSaveVersionRef = useRef(0);
+  const tagSaveChainRef = useRef<Promise<void>>(Promise.resolve());
   const lastSummaryToggleAtRef = useRef(0);
 
   currentRef.current = current;
@@ -1060,18 +1060,11 @@ export default function App() {
 
   const refreshNotes = useCallback(async () => {
     const requestID = ++listRequestRef.current;
-    const preserveCurrent = lastListFilterRef.current === listFilterKey;
-    lastListFilterRef.current = listFilterKey;
     try {
       const page = await api.listNotes(listQuery());
       if (requestID !== listRequestRef.current) return;
       setNotes(page.items);
       setListTotal({ key: listFilterKey, total: page.total });
-      if (!preserveCurrent &&
-        currentRef.current.id &&
-        !page.items.some((note) => note.id === currentRef.current.id)) {
-        setCurrent(emptyNote);
-      }
     } catch (error) {
       if (requestID === listRequestRef.current) notify(errorMessage(error));
     }
@@ -2445,24 +2438,43 @@ export default function App() {
     scheduleSave();
   };
 
-  const updateTags = useCallback(async (nextTags: string[]) => {
+  const updateTags = useCallback((nextTags: string[]) => {
     const noteID = currentRef.current.id;
-    if (!noteID || tagSaving) return;
+    if (!noteID) return;
     const previousTags = currentRef.current.tags;
+    const version = ++tagSaveVersionRef.current;
     cacheEditorNote({ ...currentRef.current, tags: nextTags });
     setCurrent((note) => note.id === noteID ? { ...note, tags: nextTags } : note);
-    setTagSaving(true);
-    try {
-      await api.setNoteTags(noteID, nextTags);
-      await Promise.all([refreshTaxonomy(), refreshNotes()]);
-    } catch (error) {
-      cacheEditorNote({ ...currentRef.current, tags: previousTags });
-      setCurrent((note) => note.id === noteID ? { ...note, tags: previousTags } : note);
-      notify(`更新標籤失敗：${errorMessage(error)}`);
-    } finally {
-      setTagSaving(false);
-    }
-  }, [cacheEditorNote, notify, refreshNotes, refreshTaxonomy, tagSaving]);
+    tagSaveChainRef.current = tagSaveChainRef.current
+      .then(() => api.setNoteTags(noteID, nextTags))
+      .then(async () => {
+        if (version !== tagSaveVersionRef.current) return;
+        await Promise.all([refreshTaxonomy(), refreshNotes()]);
+      })
+      .catch((error) => {
+        if (version !== tagSaveVersionRef.current) return;
+        if (currentRef.current.id === noteID) {
+          cacheEditorNote({ ...currentRef.current, tags: previousTags });
+          setCurrent((note) => note.id === noteID ? { ...note, tags: previousTags } : note);
+        }
+        notify(`更新標籤失敗：${errorMessage(error)}`);
+      });
+  }, [cacheEditorNote, notify, refreshNotes, refreshTaxonomy]);
+
+  const loadTagNotes = useCallback(async (tagTitle: string) => {
+    const key = tagTitle.toLocaleLowerCase();
+    const tag = tags.find((item) => item.title.toLocaleLowerCase() === key);
+    if (!tag) return { items: [], total: 0 };
+    const page = await api.listNotes({
+      view: 'tag',
+      tagId: tag.id,
+      sortBy: 'updated',
+      sortDirection: 'desc',
+      limit: 100,
+      offset: 0,
+    });
+    return { items: page.items, total: page.total };
+  }, [tags]);
 
   const saveNoteAdditionalInfo = useCallback(async (fields: NoteInfoField[]) => {
     const noteID = currentRef.current.id;
@@ -3639,8 +3651,9 @@ export default function App() {
               <NoteTags
                 key={current.id}
                 tags={current.tags}
-                disabled={tagSaving}
-                onChange={(nextTags) => void updateTags(nextTags)}
+                onChange={updateTags}
+                onLoadTagNotes={loadTagNotes}
+                onOpenNote={(noteID) => void selectNote(noteID)}
               />
               <div className="editor-footer-actions">
                 <button
