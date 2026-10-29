@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { notebookAncestorIDs, notebookPath } from './notebookPath';
+import { notebookAncestorIDs, notebookDescendantIDs, notebookPath } from './notebookPath';
 import type { Notebook } from './types';
 
 const notebook = (id: string, parentId: string, title: string): Notebook => ({
@@ -33,5 +33,15 @@ describe('notebook paths', () => {
       notebook('a', 'b', 'A'),
       notebook('b', 'a', 'B'),
     ], 'a')).toBe('B / A');
+  });
+
+  it('lists the descendants of a notebook', () => {
+    expect([...notebookDescendantIDs(notebooks, 'root')].sort()).toEqual(['child', 'grandchild']);
+    expect([...notebookDescendantIDs(notebooks, 'grandchild')]).toEqual([]);
+    expect(notebookDescendantIDs(notebooks, '').size).toBe(0);
+    expect([...notebookDescendantIDs([
+      notebook('a', 'b', 'A'),
+      notebook('b', 'a', 'B'),
+    ], 'a')]).toEqual(['b']);
   });
 });

@@ -18,7 +18,7 @@ import (
 	sqlite "modernc.org/sqlite"
 )
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 var internalResourcePattern = regexp.MustCompile(`:/[A-Za-z0-9]{32}`)
 
@@ -47,8 +47,7 @@ func init() {
 			if query == "" {
 				return int64(1), nil
 			}
-			pattern := compiledTextSearchPattern(query, caseSensitive, wholeWord)
-			if pattern.MatchString(text) {
+			if searchTextMatches(text, query, caseSensitive, wholeWord) {
 				return int64(1), nil
 			}
 			return int64(0), nil
@@ -76,6 +75,13 @@ func searchArgumentFlag(value driver.Value) bool {
 	default:
 		return false
 	}
+}
+
+func searchTextMatches(text, query string, caseSensitive, wholeWord bool) bool {
+	if caseSensitive && !wholeWord {
+		return strings.Contains(text, query)
+	}
+	return compiledTextSearchPattern(query, caseSensitive, wholeWord).MatchString(text)
 }
 
 func compiledTextSearchPattern(query string, caseSensitive bool, wholeWord bool) *regexp.Regexp {
@@ -111,6 +117,13 @@ const notebookSubtreeCondition = `n.notebook_id IN (
 	)
 	SELECT id FROM notebook_subtree
 )`
+
+func notebookScopeCondition(directOnly bool) string {
+	if directOnly {
+		return "n.notebook_id = ?"
+	}
+	return notebookSubtreeCondition
+}
 
 type Store struct {
 	db           *sql.DB
@@ -218,6 +231,7 @@ func (s *Store) initialize(ctx context.Context) error {
 			external_mtime INTEGER NOT NULL DEFAULT 0,
 			external_size INTEGER NOT NULL DEFAULT 0,
 			is_excluded INTEGER NOT NULL DEFAULT 0,
+			last_opened_at INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
 			deleted_at INTEGER NOT NULL DEFAULT 0,
@@ -307,6 +321,7 @@ func (s *Store) initialize(ctx context.Context) error {
 		{"notes", "external_mtime", "INTEGER NOT NULL DEFAULT 0"},
 		{"notes", "external_size", "INTEGER NOT NULL DEFAULT 0"},
 		{"notes", "is_excluded", "INTEGER NOT NULL DEFAULT 0"},
+		{"notes", "last_opened_at", "INTEGER NOT NULL DEFAULT 0"},
 		{"resources", "storage_kind", "TEXT NOT NULL DEFAULT 'database'"},
 		{"resources", "external_path", "TEXT NOT NULL DEFAULT ''"},
 	} {
@@ -834,11 +849,11 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 	case "trash":
 		where = append(where, "n.deleted_at > 0")
 		if strings.TrimSpace(query.NotebookID) != "" {
-			where = append(where, notebookSubtreeCondition)
+			where = append(where, notebookScopeCondition(query.NotebookDirectOnly))
 			args = append(args, query.NotebookID)
 		}
 	case "notebook":
-		where = append(where, "n.deleted_at = 0", notebookSubtreeCondition)
+		where = append(where, "n.deleted_at = 0", notebookScopeCondition(query.NotebookDirectOnly))
 		args = append(args, query.NotebookID)
 	case "tag":
 		where = append(where, "n.deleted_at = 0", "EXISTS (SELECT 1 FROM note_tags nt WHERE nt.note_id = n.id AND nt.tag_id = ?)")
@@ -853,11 +868,16 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 			where = append(where, "n.todo_completed = 0")
 		}
 		if strings.TrimSpace(query.NotebookID) != "" {
-			where = append(where, notebookSubtreeCondition)
+			where = append(where, notebookScopeCondition(query.NotebookDirectOnly))
 			args = append(args, query.NotebookID)
 		}
 	default:
 		where = append(where, "n.deleted_at = 0")
+	}
+
+	if query.OpenedSince > 0 {
+		where = append(where, "n.last_opened_at >= ?")
+		args = append(args, query.OpenedSince)
 	}
 
 	search := strings.TrimSpace(query.Search)
@@ -934,23 +954,99 @@ func (s *Store) ListNotes(ctx context.Context, query NoteQuery) (NotePage, error
 		item.IsConflict = isConflict != 0
 		item.IsPinned = isPinned != 0
 		item.Snippet = noteSnippet(body, 180)
-		item.Tags, _ = s.noteTags(ctx, item.ID)
 		items = append(items, item)
 	}
-	return NotePage{Items: items, Total: total}, rows.Err()
+	if err := rows.Err(); err != nil {
+		return NotePage{}, err
+	}
+	noteIDs := make([]string, len(items))
+	for index, item := range items {
+		noteIDs[index] = item.ID
+	}
+	tagsByNote, tagsErr := s.noteTagsFor(ctx, noteIDs)
+	if tagsErr == nil {
+		for index := range items {
+			if tags := tagsByNote[items[index].ID]; tags != nil {
+				items[index].Tags = tags
+			} else {
+				items[index].Tags = []string{}
+			}
+		}
+	}
+	return NotePage{Items: items, Total: total}, nil
 }
 
 func noteSnippet(body string, max int) string {
 	body = strings.ReplaceAll(body, "\r\n", "\n")
-	body = regexp.MustCompile(`!\[([^\]]*)\]\([^)]+\)`).ReplaceAllString(body, "$1")
-	body = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`).ReplaceAllString(body, "$1")
-	body = regexp.MustCompile(`[#>*_`+"`"+`~-]+`).ReplaceAllString(body, " ")
+	body = cleanSnippetMarkup(body)
 	body = strings.Join(strings.Fields(body), " ")
 	runes := []rune(body)
 	if len(runes) > max {
 		return string(runes[:max]) + "…"
 	}
 	return body
+}
+
+func cleanSnippetMarkup(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for index := 0; index < len(value); {
+		if (value[index] == '[' || value[index] == '!') && index+1 < len(value) {
+			if label, next, ok := snippetLinkLabel(value, index); ok {
+				builder.WriteString(label)
+				index = next
+				continue
+			}
+		}
+		if isSnippetMarker(value[index]) {
+			builder.WriteByte(' ')
+			index++
+			continue
+		}
+		builder.WriteByte(value[index])
+		index++
+	}
+	return builder.String()
+}
+
+func snippetLinkLabel(value string, start int) (string, int, bool) {
+	labelStart := start
+	if value[start] == '!' {
+		if value[start+1] != '[' {
+			return "", 0, false
+		}
+		labelStart = start + 1
+	}
+	closingBracket := strings.IndexByte(value[labelStart+1:], ']')
+	if closingBracket < 0 {
+		return "", 0, false
+	}
+	closingBracket += labelStart + 1
+	label := value[labelStart+1 : closingBracket]
+	if label == "" && value[start] != '!' {
+		return "", 0, false
+	}
+	if closingBracket+1 >= len(value) || value[closingBracket+1] != '(' {
+		return "", 0, false
+	}
+	closingParen := strings.IndexByte(value[closingBracket+2:], ')')
+	if closingParen < 0 {
+		return "", 0, false
+	}
+	closingParen += closingBracket + 2
+	if closingParen == closingBracket+2 {
+		return "", 0, false
+	}
+	return label, closingParen + 1, true
+}
+
+func isSnippetMarker(value byte) bool {
+	switch value {
+	case '#', '>', '*', '_', '`', '~', '-':
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Store) GetNote(ctx context.Context, id string) (Note, error) {
@@ -1159,6 +1255,23 @@ func (s *Store) SetNotePinned(ctx context.Context, id string, pinned bool) error
 	return nil
 }
 
+func (s *Store) MarkNoteOpened(ctx context.Context, id string, at int64) error {
+	if at <= 0 {
+		at = nowMillis()
+	}
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE notes SET last_opened_at = ? WHERE id = ? AND is_excluded = 0`,
+		at, id,
+	)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return errors.New("筆記不存在")
+	}
+	return nil
+}
+
 func (s *Store) SetNoteTodo(
 	ctx context.Context,
 	id string,
@@ -1301,10 +1414,26 @@ func (s *Store) SearchNotes(ctx context.Context, search string, limit int) ([]No
 		item.IsConflict = isConflict != 0
 		item.IsPinned = isPinned != 0
 		item.Snippet = noteSnippet(body, 180)
-		item.Tags, _ = s.noteTags(ctx, item.ID)
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	noteIDs := make([]string, len(items))
+	for index, item := range items {
+		noteIDs[index] = item.ID
+	}
+	tagsByNote, tagsErr := s.noteTagsFor(ctx, noteIDs)
+	if tagsErr == nil {
+		for index := range items {
+			if tags := tagsByNote[items[index].ID]; tags != nil {
+				items[index].Tags = tags
+			} else {
+				items[index].Tags = []string{}
+			}
+		}
+	}
+	return items, nil
 }
 
 func ftsQuery(value string) string {
@@ -1334,6 +1463,50 @@ func (s *Store) noteTags(ctx context.Context, noteID string) ([]string, error) {
 		tags = append(tags, title)
 	}
 	return tags, rows.Err()
+}
+
+func (s *Store) noteTagsFor(ctx context.Context, noteIDs []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(noteIDs))
+	const chunkSize = 400
+	for start := 0; start < len(noteIDs); start += chunkSize {
+		end := start + chunkSize
+		if end > len(noteIDs) {
+			end = len(noteIDs)
+		}
+		ids := noteIDs[start:end]
+		if len(ids) == 0 {
+			continue
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+		args := make([]any, len(ids))
+		for index, id := range ids {
+			args[index] = id
+		}
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT nt.note_id, t.title
+			 FROM tags t JOIN note_tags nt ON nt.tag_id = t.id
+			 WHERE nt.note_id IN (`+placeholders+`)
+			 ORDER BY nt.note_id, t.title COLLATE NOCASE`,
+			args...,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var noteID, title string
+			if err := rows.Scan(&noteID, &title); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			result[noteID] = append(result[noteID], title)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return result, nil
 }
 
 func (s *Store) ListTags(ctx context.Context) ([]Tag, error) {

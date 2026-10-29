@@ -100,6 +100,43 @@ describe('note list queries', () => {
     })).toMatchObject({ view: 'all', notebookId: '' });
   });
 
+  it('limits the current notebook to direct notes when requested', () => {
+    expect(buildNoteListQuery({
+      view: { kind: 'notebook', id: 'notebook-1' },
+      search: '',
+      searchScope: 'all',
+      searchField: 'all',
+      searchCaseSensitive: false,
+      searchWholeWord: false,
+      searchNotebookID: 'notebook-1',
+      notebookDirectOnly: true,
+      sortBy: 'updated',
+      sortDirection: 'desc',
+    })).toMatchObject({
+      view: 'notebook',
+      notebookId: 'notebook-1',
+      notebookDirectOnly: true,
+    });
+  });
+
+  it('passes the opened-time filter through to the list query', () => {
+    expect(buildNoteListQuery({
+      view: { kind: 'all' },
+      search: '',
+      searchScope: 'all',
+      searchField: 'all',
+      searchCaseSensitive: false,
+      searchWholeWord: false,
+      searchNotebookID: '',
+      openedSince: 1_700_000_000_000,
+      sortBy: 'updated',
+      sortDirection: 'desc',
+    })).toMatchObject({
+      view: 'all',
+      openedSince: 1_700_000_000_000,
+    });
+  });
+
   it('keeps background note refresh queries valid on the dashboard', () => {
     expect(buildNoteListQuery({
       view: { kind: 'dashboard' },

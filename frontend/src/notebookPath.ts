@@ -28,3 +28,25 @@ export function notebookAncestorIDs(notebooks: Notebook[], notebookID: string): 
   }
   return result;
 }
+
+export function notebookDescendantIDs(
+  notebooks: Notebook[],
+  notebookID: string,
+): Set<string> {
+  const result = new Set<string>();
+  if (!notebookID) return result;
+  const childrenByParent = new Map<string, string[]>();
+  for (const notebook of notebooks) {
+    const children = childrenByParent.get(notebook.parentId) ?? [];
+    children.push(notebook.id);
+    childrenByParent.set(notebook.parentId, children);
+  }
+  const queue = [...(childrenByParent.get(notebookID) ?? [])];
+  while (queue.length > 0) {
+    const id = queue.pop() as string;
+    if (id === notebookID || result.has(id)) continue;
+    result.add(id);
+    queue.push(...(childrenByParent.get(id) ?? []));
+  }
+  return result;
+}

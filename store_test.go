@@ -454,12 +454,80 @@ func TestListNotesIncludesNotebookDescendants(t *testing.T) {
 			t.Fatalf("unexpected note in subtree: %#v", item)
 		}
 	}
+	direct, err := store.ListNotes(ctx, NoteQuery{
+		View:               "notebook",
+		NotebookID:         parent.ID,
+		NotebookDirectOnly: true,
+		SortBy:             "title",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(direct.Items) != 1 || direct.Items[0].Title != "Parent note" {
+		t.Fatalf("direct notes = %#v, want only Parent note", direct.Items)
+	}
 	trash, err := store.ListNotes(ctx, NoteQuery{View: "trash", NotebookID: parent.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(trash.Items) != 1 || trash.Items[0].ID != childNote.ID {
 		t.Fatalf("trashed descendant = %#v", trash.Items)
+	}
+}
+
+func TestListNotesFiltersByLastOpened(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	notebook, err := store.CreateNotebook(ctx, "Opened", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened, err := store.CreateNote(ctx, notebook.ID, "Opened note", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateNote(ctx, notebook.ID, "Never opened", ""); err != nil {
+		t.Fatal(err)
+	}
+	now := nowMillis()
+	if err := store.MarkNoteOpened(ctx, opened.ID, now); err != nil {
+		t.Fatal(err)
+	}
+
+	recent, err := store.ListNotes(ctx, NoteQuery{
+		View:        "notebook",
+		NotebookID:  notebook.ID,
+		OpenedSince: now - 60_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recent.Items) != 1 || recent.Items[0].ID != opened.ID {
+		t.Fatalf("notes opened since = %#v", recent.Items)
+	}
+
+	future, err := store.ListNotes(ctx, NoteQuery{
+		View:        "notebook",
+		NotebookID:  notebook.ID,
+		OpenedSince: now + 60_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(future.Items) != 0 {
+		t.Fatalf("notes opened after the boundary = %#v", future.Items)
+	}
+
+	all, err := store.ListNotes(ctx, NoteQuery{View: "notebook", NotebookID: notebook.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Items) != 2 {
+		t.Fatalf("notes without an opened filter = %d, want 2", len(all.Items))
+	}
+
+	if err := store.MarkNoteOpened(ctx, "missing", now); err == nil {
+		t.Fatal("expected MarkNoteOpened to reject an unknown note")
 	}
 }
 
@@ -526,6 +594,7 @@ func TestOpenStoreMigratesPinnedColumn(t *testing.T) {
 		{"notes", "external_path"},
 		{"notes", "external_mtime"},
 		{"notes", "external_size"},
+		{"notes", "last_opened_at"},
 		{"resources", "storage_kind"},
 		{"resources", "external_path"},
 	} {

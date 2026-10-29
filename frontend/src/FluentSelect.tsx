@@ -6,11 +6,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import UiIcon from './UiIcon';
+import UiIcon, { type UiIconName } from './UiIcon';
 
 export interface FluentSelectOption<T extends string> {
   value: T;
   label: string;
+  icon?: UiIconName;
   disabled?: boolean;
 }
 
@@ -21,6 +22,7 @@ export interface FluentSelectProps<T extends string> {
   ariaLabel: string;
   className?: string;
   disabled?: boolean;
+  iconOnly?: boolean;
 }
 
 interface MenuPosition {
@@ -37,6 +39,7 @@ export default function FluentSelect<T extends string>({
   ariaLabel,
   className = '',
   disabled = false,
+  iconOnly = false,
 }: FluentSelectProps<T>) {
   const menuId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -180,15 +183,20 @@ export default function FluentSelect<T extends string>({
         className="fluent-select-trigger"
         type="button"
         role="combobox"
-        aria-label={ariaLabel}
+        aria-label={iconOnly && selectedOption ? `${ariaLabel}：${selectedOption.label}` : ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={disabled}
+        title={iconOnly ? `${ariaLabel}：${selectedOption?.label ?? ''}` : undefined}
         onClick={() => open ? closeMenu() : openMenu()}
         onKeyDown={handleTriggerKeyDown}
       >
-        <span className="fluent-select-value">{selectedOption?.label ?? ''}</span>
+        {iconOnly && selectedOption?.icon ? (
+          <UiIcon name={selectedOption.icon} className="fluent-select-icon" />
+        ) : (
+          <span className="fluent-select-value">{selectedOption?.label ?? ''}</span>
+        )}
         <UiIcon name="chevron-down" className="fluent-select-chevron" />
       </button>
       {open && createPortal(
@@ -209,7 +217,7 @@ export default function FluentSelect<T extends string>({
         >
           {options.map((option) => (
             <button
-              className="fluent-select-option"
+              className={`fluent-select-option ${option.icon ? 'has-icon' : ''}`.trim()}
               type="button"
               role="option"
               aria-selected={option.value === value}
@@ -220,6 +228,9 @@ export default function FluentSelect<T extends string>({
               <span className="fluent-select-check" aria-hidden="true">
                 {option.value === value ? '✓' : ''}
               </span>
+              {option.icon && (
+                <UiIcon name={option.icon} className="fluent-select-option-icon" />
+              )}
               <span>{option.label}</span>
             </button>
           ))}

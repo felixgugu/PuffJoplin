@@ -138,6 +138,7 @@ export interface NoteExportRequest {
 export interface NoteQuery {
   view: 'all' | 'notebook' | 'tag' | 'todo' | 'trash';
   notebookId?: string;
+  notebookDirectOnly?: boolean;
   tagId?: string;
   todoStatus?: TodoStatus;
   search?: string;
@@ -146,6 +147,7 @@ export interface NoteQuery {
   searchWholeWord?: boolean;
   sortBy?: NoteSortBy;
   sortDirection?: NoteSortDirection;
+  openedSince?: number;
   limit?: number;
   offset?: number;
 }

@@ -404,6 +404,14 @@ func (a *App) SetNotePinned(id string, pinned bool) error {
 	return nil
 }
 
+func (a *App) MarkNoteOpened(id string) error {
+	store, err := a.readyStore()
+	if err != nil {
+		return err
+	}
+	return store.MarkNoteOpened(a.ctx, id, nowMillis())
+}
+
 func (a *App) SetNoteTodo(id string, isTodo bool, todoDue int64, todoCompleted int64) error {
 	store, err := a.readyStore()
 	if err != nil {

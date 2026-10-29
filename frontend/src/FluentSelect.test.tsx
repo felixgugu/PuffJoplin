@@ -40,6 +40,31 @@ function renderSelect() {
   return onChange;
 }
 
+function IconSelectHarness() {
+  const [value, setValue] = useState('updated');
+  return (
+    <FluentSelect
+      value={value}
+      iconOnly
+      options={[
+        { value: 'title', label: '字母', icon: 'sort-title' },
+        { value: 'updated', label: '修改日期', icon: 'sort-updated' },
+      ]}
+      onChange={setValue}
+      ariaLabel="筆記排序方式"
+    />
+  );
+}
+
+function renderIconSelect() {
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  act(() => {
+    root?.render(<IconSelectHarness />);
+  });
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   root = null;
@@ -63,6 +88,20 @@ describe('FluentSelect', () => {
     expect(onChange).toHaveBeenCalledWith('title');
     expect(document.querySelector('[role="listbox"]')).toBeNull();
     expect(trigger?.textContent).toContain('字母');
+  });
+
+  it('renders icon-only triggers without repeating the label', () => {
+    renderIconSelect();
+    const trigger = document.querySelector<HTMLButtonElement>('[role="combobox"]');
+
+    expect(trigger?.textContent).not.toContain('修改日期');
+    expect(trigger?.getAttribute('aria-label')).toBe('筆記排序方式：修改日期');
+    expect(trigger?.querySelector('.fluent-select-icon')).not.toBeNull();
+
+    act(() => trigger?.click());
+    const menu = document.querySelector<HTMLElement>('[role="listbox"]');
+    expect(menu?.querySelectorAll('.fluent-select-option-icon').length).toBe(2);
+    expect(menu?.textContent).toContain('修改日期');
   });
 
   it('supports keyboard navigation and Escape focus return', async () => {

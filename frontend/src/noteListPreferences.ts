@@ -8,6 +8,8 @@ import type {
 
 export const NOTE_LIST_COLLAPSED_KEY = 'puffjoplin.noteList.collapsed';
 export const NOTE_LIST_SUMMARY_KEY = 'puffjoplin.noteList.showSummary';
+export const NOTE_LIST_INCLUDE_SUBNOTEBOOKS_KEY = 'puffjoplin.noteList.includeSubnotebooks';
+export const NOTE_LIST_OPENED_FILTER_KEY = 'puffjoplin.noteList.openedFilter';
 export const NOTE_TAG_PANEL_OPEN_KEY = 'puffjoplin.noteList.tagPanelOpen';
 export const NOTE_TAG_PANEL_RATIO_KEY = 'puffjoplin.noteList.tagPanelRatio';
 export const NOTE_SORT_BY_KEY = 'puffjoplin.noteList.sortBy';
@@ -57,6 +59,10 @@ export function shouldExpandNoteList(collapsed: boolean, hasCurrentNote: boolean
 }
 
 export function parseShowNoteSummary(value: string | null): boolean {
+  return value !== 'false';
+}
+
+export function parseIncludeSubnotebooks(value: string | null): boolean {
   return value !== 'false';
 }
 

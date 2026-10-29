@@ -108,6 +108,7 @@ type NoteInfoField struct {
 type NoteQuery struct {
 	View                string `json:"view"`
 	NotebookID          string `json:"notebookId"`
+	NotebookDirectOnly  bool   `json:"notebookDirectOnly"`
 	TagID               string `json:"tagId"`
 	TodoStatus          string `json:"todoStatus"`
 	Search              string `json:"search"`
@@ -116,6 +117,7 @@ type NoteQuery struct {
 	SearchWholeWord     bool   `json:"searchWholeWord"`
 	SortBy              string `json:"sortBy"`
 	SortDirection       string `json:"sortDirection"`
+	OpenedSince         int64  `json:"openedSince"`
 	Limit               int    `json:"limit"`
 	Offset              int    `json:"offset"`
 }

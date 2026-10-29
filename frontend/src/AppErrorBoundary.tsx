@@ -58,7 +58,6 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
     return (
       <main className="fatal-screen">
         <div className="fatal-card">
-          <div className="brand-mark large">P</div>
           <h1>介面發生錯誤</h1>
           <p>{this.state.error.message || '未知錯誤'}</p>
           <p className="error-report-note">錯誤已寫入 data/logs/puffjoplin.log，筆記資料未受影響。</p>

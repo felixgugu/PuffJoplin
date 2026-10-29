@@ -20,7 +20,7 @@ import Dashboard from './Dashboard';
 import { convertNotebookMarkdownToDocx } from './docxExport';
 import EditorTabBar from './EditorTabBar';
 import EditorSettings from './EditorSettings';
-import FluentSelect from './FluentSelect';
+import FluentSelect, { type FluentSelectOption } from './FluentSelect';
 import {
   placeSidebarActionMenu,
   type FloatingMenuPosition,
@@ -120,6 +120,8 @@ import {
   MIN_NOTE_TAG_PANEL_RATIO,
   NOTE_LIST_COLLAPSED_KEY,
   NOTE_LIST_SUMMARY_KEY,
+  NOTE_LIST_INCLUDE_SUBNOTEBOOKS_KEY,
+  NOTE_LIST_OPENED_FILTER_KEY,
   NOTE_TAG_PANEL_OPEN_KEY,
   NOTE_TAG_PANEL_RATIO_KEY,
   NOTE_SORT_BY_KEY,
@@ -136,6 +138,7 @@ import {
   parseNoteTagPanelRatio,
   parseSearchToggle,
   parseShowNoteSummary,
+  parseIncludeSubnotebooks,
   parseSearchScope,
   parseTodoStatus,
   parseTodoSortBy,
@@ -155,7 +158,7 @@ import {
   SIDEBAR_TAB_KEY,
   SIDEBAR_WIDTH_KEY,
 } from './notebookTree';
-import { notebookAncestorIDs, notebookPath } from './notebookPath';
+import { notebookAncestorIDs, notebookDescendantIDs, notebookPath } from './notebookPath';
 import { formatTagLabel } from './tagFormatting';
 import {
   cancelTodo,
@@ -168,6 +171,14 @@ import {
   todoDueLabel,
 } from './noteTodo';
 import { buildNoteListQuery } from './noteQuery';
+import { noteDirectoryLabel } from './noteListLabel';
+import {
+  openedFilterDisplayValue,
+  openedFilterFromDisplayValue,
+  openedSinceFor,
+  parseNoteOpenedFilter,
+  type NoteOpenedFilter,
+} from './noteOpenedFilter';
 import {
   BASE_FONT_SIZE_KEY,
   decodeStoredString,
@@ -203,6 +214,8 @@ import type {
   TodoStatus,
   View,
 } from './types';
+
+type NoteListDisplayMode = NoteSortBy | 'opened-today' | 'opened-3d';
 
 const emptyNote: Note = {
   id: '',
@@ -302,6 +315,11 @@ export default function App() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
+  const [listTotal, setListTotal] = useState<{ key: string; total: number } | null>(null);
+  const [unfilteredListTotal, setUnfilteredListTotal] = useState<{
+    key: string;
+    total: number;
+  } | null>(null);
   const [current, setCurrent] = useState<Note>(emptyNote);
   const [editorNoteCache, setEditorNoteCache] = useState<Record<string, Note>>({});
   const [mountedEditorIDs, setMountedEditorIDs] = useState<Set<string>>(() => new Set());
@@ -387,6 +405,12 @@ export default function App() {
   );
   const [showNoteSummary, setShowNoteSummary] = useState(
     () => parseShowNoteSummary(localStorage.getItem(NOTE_LIST_SUMMARY_KEY)),
+  );
+  const [includeSubnotebookNotes, setIncludeSubnotebookNotes] = useState(
+    () => parseIncludeSubnotebooks(localStorage.getItem(NOTE_LIST_INCLUDE_SUBNOTEBOOKS_KEY)),
+  );
+  const [noteOpenedFilter, setNoteOpenedFilter] = useState<NoteOpenedFilter>(
+    () => parseNoteOpenedFilter(localStorage.getItem(NOTE_LIST_OPENED_FILTER_KEY)),
   );
   const [noteTagPanelOpen, setNoteTagPanelOpen] = useState(
     () => parseNoteTagPanelOpen(localStorage.getItem(NOTE_TAG_PANEL_OPEN_KEY)),
@@ -659,6 +683,17 @@ export default function App() {
   }, [showNoteSummary]);
 
   useEffect(() => {
+    localStorage.setItem(
+      NOTE_LIST_INCLUDE_SUBNOTEBOOKS_KEY,
+      String(includeSubnotebookNotes),
+    );
+  }, [includeSubnotebookNotes]);
+
+  useEffect(() => {
+    localStorage.setItem(NOTE_LIST_OPENED_FILTER_KEY, noteOpenedFilter);
+  }, [noteOpenedFilter]);
+
+  useEffect(() => {
     localStorage.setItem(NOTE_TAG_PANEL_OPEN_KEY, String(noteTagPanelOpen));
   }, [noteTagPanelOpen]);
 
@@ -864,6 +899,13 @@ export default function App() {
     });
   }, []);
 
+  const markNoteOpened = useCallback((id: string) => {
+    if (!id) return;
+    void api.markNoteOpened(id).catch(() => {
+      // Opening a note must not fail the editor when the timestamp cannot be stored.
+    });
+  }, []);
+
   const markEditorReady = useCallback((id: string) => {
     if (!id) return;
     setReadyEditorIDs((ready) => {
@@ -900,6 +942,12 @@ export default function App() {
   const searchNotebookID = view.kind === 'notebook' ? view.id : current.notebookId;
   const effectiveSearchScope = searchNotebookID ? searchScope : 'all';
   const searching = search.trim() !== '';
+  const listNotebookID = view.kind === 'notebook'
+    ? view.id
+    : searching && effectiveSearchScope === 'current'
+      ? searchNotebookID
+      : '';
+  const notebookScopedList = listNotebookID !== '';
   const activeSortBy = view.kind === 'todo' ? todoSortBy : noteSortBy;
   const activeSortDirection = view.kind === 'todo'
     ? todoSortDirection
@@ -908,6 +956,26 @@ export default function App() {
     if (view.kind === 'todo') setTodoSortBy(value);
     else setNoteSortBy(value);
   };
+  const openedDisplayValue = openedFilterDisplayValue(noteOpenedFilter);
+  const activeDisplayMode: NoteListDisplayMode = openedDisplayValue ?? activeSortBy;
+  const updateActiveDisplayMode = (value: NoteListDisplayMode) => {
+    if (value === 'opened-today' || value === 'opened-3d') {
+      setNoteOpenedFilter(openedFilterFromDisplayValue(value));
+      return;
+    }
+    setNoteOpenedFilter('any');
+    updateActiveSortBy(value);
+  };
+  const noteListDisplayOptions: FluentSelectOption<NoteListDisplayMode>[] = [
+    { value: 'title', label: '字母', icon: 'sort-title' },
+    { value: 'created', label: '新增日期', icon: 'sort-created' },
+    { value: 'updated', label: '修改日期', icon: 'sort-updated' },
+    ...(view.kind === 'todo'
+      ? [{ value: 'due' as const, label: '到期日', icon: 'sort-due' as const }]
+      : []),
+    { value: 'opened-today', label: '今天有開啟', icon: 'eye' },
+    { value: 'opened-3d', label: '3天內有開啟', icon: 'opened-recent' },
+  ];
   const toggleActiveSortDirection = () => {
     if (view.kind === 'todo') {
       setTodoSortDirection((value) => value === 'asc' ? 'desc' : 'asc');
@@ -925,8 +993,10 @@ export default function App() {
       searchCaseSensitive,
       searchWholeWord,
       searchNotebookID,
+      notebookDirectOnly: !includeSubnotebookNotes,
       sortBy: activeSortBy,
       sortDirection: activeSortDirection,
+      openedSince: openedSinceFor(noteOpenedFilter, Date.now()),
       todoStatus: view.kind === 'todo' ? todoStatus : undefined,
       limit: 300,
       offset: 0,
@@ -935,6 +1005,7 @@ export default function App() {
     activeSortBy,
     activeSortDirection,
     effectiveSearchScope,
+    noteOpenedFilter,
     search,
     searchCaseSensitive,
     searchField,
@@ -942,11 +1013,14 @@ export default function App() {
     searchWholeWord,
     todoStatus,
     view,
+    includeSubnotebookNotes,
   ]);
 
   const listFilterKey = [
     view.kind,
     view.kind === 'notebook' || view.kind === 'tag' ? view.id : '',
+    includeSubnotebookNotes ? 'subtree' : 'direct',
+    noteOpenedFilter,
     search,
     searching ? effectiveSearchScope : '',
     searching ? searchNotebookID : '',
@@ -961,6 +1035,15 @@ export default function App() {
     () => filterNotesByTag(notes, selectedNoteTag),
     [notes, selectedNoteTag],
   );
+  const noteDirectoryLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    const subdirectoryIDs = notebookDescendantIDs(notebooks, listNotebookID);
+    for (const note of visibleNotes) {
+      const label = noteDirectoryLabel(note, subdirectoryIDs.has(note.notebookId));
+      if (label) labels.set(note.id, label);
+    }
+    return labels;
+  }, [listNotebookID, notebooks, visibleNotes]);
 
   useEffect(() => {
     setSelectedNoteTag('');
@@ -983,6 +1066,7 @@ export default function App() {
       const page = await api.listNotes(listQuery());
       if (requestID !== listRequestRef.current) return;
       setNotes(page.items);
+      setListTotal({ key: listFilterKey, total: page.total });
       if (!preserveCurrent &&
         currentRef.current.id &&
         !page.items.some((note) => note.id === currentRef.current.id)) {
@@ -992,6 +1076,53 @@ export default function App() {
       if (requestID === listRequestRef.current) notify(errorMessage(error));
     }
   }, [listFilterKey, listQuery, notify]);
+
+  // Burst edits (autosave, pin, todo, tag changes) trigger both a direct refresh
+  // and a `notes.changed` event; collapsing them keeps one list query per burst.
+  const refreshNotesRef = useRef(refreshNotes);
+  const refreshNotesTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    refreshNotesRef.current = refreshNotes;
+  }, [refreshNotes]);
+  const refreshNotesSoon = useCallback(() => {
+    if (refreshNotesTimerRef.current !== null) return;
+    refreshNotesTimerRef.current = window.setTimeout(() => {
+      refreshNotesTimerRef.current = null;
+      void refreshNotesRef.current();
+    }, 180);
+  }, []);
+  useEffect(() => () => {
+    if (refreshNotesTimerRef.current !== null) {
+      window.clearTimeout(refreshNotesTimerRef.current);
+      refreshNotesTimerRef.current = null;
+    }
+  }, []);
+
+  const trackHiddenNotes = noteOpenedFilter !== 'any' && view.kind !== 'dashboard';
+
+  useEffect(() => {
+    if (!trackHiddenNotes) {
+      setUnfilteredListTotal(null);
+      return undefined;
+    }
+    let cancelled = false;
+    void api.listNotes({ ...listQuery(), openedSince: 0, limit: 1 })
+      .then((page) => {
+        if (!cancelled) setUnfilteredListTotal({ key: listFilterKey, total: page.total });
+      })
+      .catch(() => {
+        if (!cancelled) setUnfilteredListTotal(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listFilterKey, listQuery, trackHiddenNotes]);
+
+  const hiddenNoteCount = trackHiddenNotes &&
+    listTotal?.key === listFilterKey &&
+    unfilteredListTotal?.key === listFilterKey
+    ? Math.max(0, unfilteredListTotal.total - listTotal.total)
+    : 0;
 
   const saveCurrent = useCallback(async (showConfirmation = false): Promise<boolean> => {
     const value = currentRef.current;
@@ -1025,7 +1156,7 @@ export default function App() {
         currentRef.current.body === snapshotBody) {
         dirtyRef.current = false;
       }
-      await refreshNotes();
+      refreshNotesSoon();
       if (showConfirmation) notify('筆記已儲存');
     } catch (error) {
       saveFailed = true;
@@ -1041,7 +1172,7 @@ export default function App() {
       }
     }
     return !saveFailed && !dirtyRef.current;
-  }, [cacheEditorNote, notify, refreshNotes]);
+  }, [cacheEditorNote, notify, refreshNotesSoon]);
 
   const cleanupUnusedResources = useCallback(async () => {
     if (resourceCleanupRunning) return;
@@ -1221,7 +1352,8 @@ export default function App() {
     setSaveState('saved');
     setExportMenuOpen(false);
     setAttachmentMenuOpen(false);
-  }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent, switchGuard]);
+    markNoteOpened(note.id);
+  }, [cacheEditorNote, forgetEditorNotes, markNoteOpened, mountEditorNote, notify, saveCurrent, switchGuard]);
 
   const openDashboardNote = useCallback(async (noteID: string) => {
     setView({ kind: 'all' });
@@ -1278,7 +1410,8 @@ export default function App() {
     setSaveState('saved');
     setExportMenuOpen(false);
     setAttachmentMenuOpen(false);
-  }, [cacheEditorNote, forgetEditorNotes, mountEditorNote, notify, saveCurrent, switchGuard]);
+    markNoteOpened(id);
+  }, [cacheEditorNote, forgetEditorNotes, markNoteOpened, mountEditorNote, notify, saveCurrent, switchGuard]);
 
   const toggleOpenTabPin = useCallback((id: string) => {
     setEditorTabs((tabs) => toggleEditorTabPin(tabs, id));
@@ -1452,6 +1585,7 @@ export default function App() {
       if (restoredNote) {
         setCurrent(restoredNote);
         setSaveState('saved');
+        markNoteOpened(restoredNote.id);
       } else if (page.items.length > 0) {
         await selectNote(page.items[0].id);
       } else if (decision === 'prompt-joplin') {
@@ -1475,7 +1609,7 @@ export default function App() {
     } catch (error) {
       setFatalError(errorMessage(error));
     }
-  }, [createWelcomeNote, refreshTaxonomy, restoreEditorTabSession, selectNote]);
+  }, [createWelcomeNote, markNoteOpened, refreshTaxonomy, restoreEditorTabSession, selectNote]);
 
   useEffect(() => {
     if (initializedRef.current) return;
@@ -1490,7 +1624,7 @@ export default function App() {
   useEffect(() => {
     const cleanups = [
       onEvent('notes.changed', () => {
-        void refreshNotes();
+        refreshNotesSoon();
         if (viewRef.current.kind === 'dashboard') void refreshDashboard();
       }),
       onEvent('notebooks.changed', () => {
@@ -1556,7 +1690,7 @@ export default function App() {
     cacheEditorNote,
     forgetEditorNotes,
     refreshDashboard,
-    refreshNotes,
+    refreshNotesSoon,
     refreshTaxonomy,
   ]);
 
@@ -1619,6 +1753,7 @@ export default function App() {
       mountEditorNote(note.id);
       setCurrent(note);
       setEditorTabs((tabs) => openEditorNote(tabs, { id: note.id, title: note.title }));
+      markNoteOpened(note.id);
       if (view.kind !== 'todo') setView({ kind: 'notebook', id: activeNotebookId });
       await Promise.all([refreshNotes(), refreshTaxonomy()]);
     } catch (error) {
@@ -1627,6 +1762,7 @@ export default function App() {
   }, [
     activeNotebookId,
     cacheEditorNote,
+    markNoteOpened,
     mountEditorNote,
     notify,
     refreshNotes,
@@ -2595,11 +2731,16 @@ export default function App() {
     setSelectedNoteTag((selected) => selected === title ? '' : title);
   };
 
+  const toggleNoteListPanels = () => {
+    const nextCollapsed = !noteListCollapsed;
+    setNoteListCollapsed(nextCollapsed);
+    setSidebarCollapsed(nextCollapsed);
+  };
+
   if (fatalError) {
     return (
       <main className="fatal-screen">
         <div className="fatal-card">
-          <div className="brand-mark large">P</div>
           <h1>PuffJoplin 無法啟動</h1>
           <p>{fatalError}</p>
           <button className="primary" onClick={() => api.openDataFolder()}>開啟資料資料夾</button>
@@ -2635,6 +2776,9 @@ export default function App() {
               ? `${dashboardSnapshot?.counts.activeNotes ?? 0} 篇`
               : `${notes.length} 篇`}
           </span>
+          {hiddenNoteCount > 0 && (
+            <span className="titlebar-hidden-count">{hiddenNoteCount} 篇被隱藏</span>
+          )}
         </div>
         <GlobalSearch
           query={search}
@@ -3005,30 +3149,40 @@ export default function App() {
         <section className="note-list-panel">
             <header className="note-list-header">
               <div className="note-list-sort">
-                <FluentSelect<NoteSortBy>
-                  className="note-sort-select"
-                  value={activeSortBy}
-                  ariaLabel={view.kind === 'todo' ? '待辦排序方式' : '筆記排序方式'}
-                  options={[
-                    { value: 'title', label: '字母' },
-                    { value: 'created', label: '新增日期' },
-                    { value: 'updated', label: '修改日期' },
-                    ...(view.kind === 'todo'
-                      ? [{ value: 'due' as const, label: '到期日' }]
-                      : []),
-                  ]}
-                  onChange={updateActiveSortBy}
+                <FluentSelect<NoteListDisplayMode>
+                  className={`note-sort-select ${noteOpenedFilter !== 'any' ? 'has-filter' : ''}`}
+                  value={activeDisplayMode}
+                  iconOnly
+                  ariaLabel={view.kind === 'todo' ? '待辦清單顯示方式' : '筆記清單顯示方式'}
+                  options={noteListDisplayOptions}
+                  onChange={updateActiveDisplayMode}
                 />
                 <button
                   className="note-sort-direction"
                   type="button"
                   aria-label={activeSortDirection === 'asc' ? '目前正序，切換為倒序' : '目前倒序，切換為正序'}
+                  title={activeSortDirection === 'asc' ? '正序（點擊切換為倒序）' : '倒序（點擊切換為正序）'}
                   onClick={toggleActiveSortDirection}
                 >
-                  {activeSortDirection === 'asc' ? '正序 ↑' : '倒序 ↓'}
+                  <UiIcon name={activeSortDirection === 'asc' ? 'arrow-up' : 'arrow-down'} />
                 </button>
               </div>
               <div className="note-list-actions">
+                <button
+                  className={`icon-button note-subtree-toggle ${notebookScopedList && includeSubnotebookNotes ? 'active' : ''}`}
+                  type="button"
+                  aria-label={notebookScopedList
+                    ? (includeSubnotebookNotes ? '隱藏子目錄筆記' : '顯示子目錄筆記')
+                    : '子目錄筆記開關，只在筆記本檢視可用'}
+                  aria-pressed={includeSubnotebookNotes}
+                  title={notebookScopedList
+                    ? (includeSubnotebookNotes ? '隱藏子目錄筆記' : '顯示子目錄筆記')
+                    : '只在筆記本檢視或目前目錄搜尋時可用'}
+                  disabled={!notebookScopedList}
+                  onClick={() => setIncludeSubnotebookNotes((value) => !value)}
+                >
+                  <UiIcon name="subtree" />
+                </button>
                 <button
                   className={`icon-button note-tag-panel-toggle ${noteTagPanelOpen ? 'active' : ''}`}
                   type="button"
@@ -3113,10 +3267,14 @@ export default function App() {
                       ? '沒有符合所選標籤的筆記'
                       : search
                         ? '找不到符合的筆記'
-                        : '這裡還沒有筆記'}
+                        : noteOpenedFilter !== 'any'
+                          ? '沒有符合開啟時間的筆記'
+                          : '這裡還沒有筆記'}
                   </p>
                   {selectedNoteTag ? (
                     <button onClick={() => setSelectedNoteTag('')}>清除標籤篩選</button>
+                  ) : noteOpenedFilter !== 'any' ? (
+                    <button onClick={() => setNoteOpenedFilter('any')}>清除開啟時間篩選</button>
                   ) : !search && (
                     <button onClick={() => void createNote()}>建立第一篇筆記</button>
                   )}
@@ -3165,12 +3323,21 @@ export default function App() {
                     onClick={() => void selectNote(note.id)}
                   >
                     <div className="note-card-top">
-                      <span className="note-card-title">{note.title || '未命名筆記'}</span>
+                      <span className="note-card-title">
+                        {noteDirectoryLabels.has(note.id) && (
+                          <span className="note-card-directory">
+                            {noteDirectoryLabels.get(note.id)} /{' '}
+                          </span>
+                        )}
+                        <span className="note-card-title-text">
+                          {note.title || '未命名筆記'}
+                        </span>
+                      </span>
                       <time>{formatDate(note.updatedAt)}</time>
                     </div>
                     <p>{note.snippet || '空白筆記'}</p>
                     <div className="note-card-meta">
-                      <span>{note.notebookTitle}</span>
+                      {!noteDirectoryLabels.has(note.id) && <span>{note.notebookTitle}</span>}
                       {note.isTodo && note.todoDue > 0 && (
                         <span className={`todo-due-badge ${todoDueClassName(note.todoDue)}`}>
                           {todoDueLabel(note.todoDue)}
@@ -3299,9 +3466,9 @@ export default function App() {
                 <button
                   className="icon-button collapse-note-list-button"
                   type="button"
-                  aria-label={noteListCollapsed ? '展開筆記清單' : '收合筆記清單'}
-                  title={noteListCollapsed ? '展開筆記清單' : '收合筆記清單'}
-                  onClick={() => setNoteListCollapsed((value) => !value)}
+                  aria-label={noteListCollapsed ? '展開筆記清單與筆記本樹' : '收合筆記清單與筆記本樹'}
+                  title={noteListCollapsed ? '展開筆記清單與筆記本樹' : '收合筆記清單與筆記本樹'}
+                  onClick={toggleNoteListPanels}
                 >
                   <UiIcon name={noteListCollapsed ? 'panel-open' : 'panel-close'} />
                 </button>

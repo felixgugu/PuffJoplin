@@ -15,6 +15,7 @@ import {
   parseSearchScope,
   parseSearchToggle,
   parseShowNoteSummary,
+  parseIncludeSubnotebooks,
   parseTodoStatus,
   parseTodoSortBy,
   shouldExpandNoteList,
@@ -48,6 +49,13 @@ describe('note list preferences', () => {
     expect(parseShowNoteSummary('true')).toBe(true);
     expect(parseShowNoteSummary('false')).toBe(false);
     expect(parseShowNoteSummary('unexpected')).toBe(true);
+  });
+
+  it('includes subnotebook notes by default', () => {
+    expect(parseIncludeSubnotebooks(null)).toBe(true);
+    expect(parseIncludeSubnotebooks('true')).toBe(true);
+    expect(parseIncludeSubnotebooks('false')).toBe(false);
+    expect(parseIncludeSubnotebooks('unexpected')).toBe(true);
   });
 
   it('defaults the tag panel to a hidden one-third split', () => {

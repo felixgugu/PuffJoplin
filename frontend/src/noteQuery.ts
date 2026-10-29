@@ -15,8 +15,10 @@ interface NoteQueryOptions {
   searchCaseSensitive: boolean;
   searchWholeWord: boolean;
   searchNotebookID: string;
+  notebookDirectOnly?: boolean;
   sortBy: NoteSortBy;
   sortDirection: NoteSortDirection;
+  openedSince?: number;
   todoStatus?: 'open' | 'completed' | 'all';
   limit?: number;
   offset?: number;
@@ -50,6 +52,7 @@ export function buildNoteListQuery(options: NoteQueryOptions): NoteQuery {
   return {
     view: queryView,
     notebookId,
+    notebookDirectOnly: options.notebookDirectOnly ?? false,
     tagId,
     todoStatus: options.view.kind === 'todo' ? options.todoStatus || 'open' : undefined,
     search: options.search,
@@ -58,6 +61,7 @@ export function buildNoteListQuery(options: NoteQueryOptions): NoteQuery {
     searchWholeWord: options.searchWholeWord,
     sortBy: options.sortBy,
     sortDirection: options.sortDirection,
+    openedSince: options.openedSince ?? 0,
     limit: options.limit ?? 300,
     offset: options.offset ?? 0,
   };

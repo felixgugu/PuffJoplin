@@ -324,6 +324,12 @@ button:disabled {
   white-space: nowrap;
 }
 
+.note-card-directory {
+  color: var(--faint);
+  font-size: calc(1rem - 1px);
+  font-weight: 500;
+}
+
 .note-card time {
   flex: none;
   color: var(--faint);
@@ -583,7 +589,7 @@ button:disabled {
 }
 
 .fatal-card h1 {
-  margin: 20px 0 8px;
+  margin: 0 0 10px;
   font-family: Georgia, serif;
   font-weight: 500;
 }
@@ -1230,6 +1236,18 @@ select:focus-visible {
   font-weight: 600;
 }
 
+.fluent-select-option.has-icon {
+  grid-template-columns: 18px 16px minmax(0, 1fr);
+}
+
+.fluent-select-option-icon {
+  color: var(--muted);
+}
+
+.fluent-select-option[aria-selected="true"] .fluent-select-option-icon {
+  color: var(--accent);
+}
+
 .fluent-select-option:disabled {
   opacity: 0.45;
 }
@@ -1471,6 +1489,9 @@ select:focus-visible {
 
 .note-card.is-completed .note-card-title {
   color: var(--muted);
+}
+
+.note-card.is-completed .note-card-title-text {
   text-decoration: line-through;
   text-decoration-thickness: 1px;
 }
@@ -1668,7 +1689,7 @@ select:focus-visible {
   gap: 3px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 4px var(--editor-inline-padding) 0 calc(var(--editor-inline-padding) - 5px);
+  padding: 4px var(--editor-inline-padding) 0;
   border-bottom: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--surface) 42%, transparent);
 }
@@ -1720,9 +1741,10 @@ select:focus-visible {
   height: 100%;
   flex: 1;
   align-items: center;
-  padding: 0 4px;
+  padding: 0 4px 0 11px;
   color: inherit;
   text-align: left;
+  font-size: 0.8rem;
 }
 
 .editor-tab-main > span:last-child {
@@ -1793,7 +1815,7 @@ select:focus-visible {
   min-width: 0;
   max-width: min(40%, 360px);
   flex: 0 1 auto;
-  padding: 4px 5px;
+  padding: 4px 5px 6px 4px;
   overflow: hidden;
   color: var(--muted);
   font-size: 1rem;
@@ -3523,7 +3545,7 @@ body.editor-scrollbar-dragging-x {
 .titlebar-context {
   display: flex;
   min-width: 0;
-  align-items: center;
+  align-items: baseline;
   gap: 9px;
 }
 
@@ -3541,6 +3563,13 @@ body.editor-scrollbar-dragging-x {
   flex: none;
   color: var(--muted);
   font-size: 9.5px;
+}
+
+.titlebar-hidden-count {
+  flex: none;
+  color: var(--faint);
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 .titlebar-search {
@@ -3995,14 +4024,15 @@ body.editor-scrollbar-dragging-x {
 }
 
 .note-sort-select {
-  min-width: 0;
-  max-width: 112px;
-  flex: 1;
+  width: 34px;
+  flex: none;
 }
 
 .note-sort-select .fluent-select-trigger {
   min-height: 28px;
-  padding: 3px 5px;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px 2px;
   border-color: transparent;
   background: transparent;
   color: var(--muted);
@@ -4017,8 +4047,12 @@ body.editor-scrollbar-dragging-x {
 }
 
 .note-sort-select .fluent-select-chevron {
-  width: 13px;
-  height: 13px;
+  width: 10px;
+  height: 10px;
+}
+
+.note-sort-select.has-filter .fluent-select-icon {
+  color: var(--accent);
 }
 
 .note-sort-direction,
@@ -4029,6 +4063,13 @@ body.editor-scrollbar-dragging-x {
   color: var(--muted);
   font-size: 0.8rem;
   white-space: nowrap;
+}
+
+.note-sort-direction {
+  display: grid;
+  width: 28px;
+  padding: 0;
+  place-items: center;
 }
 
 .note-sort-direction:hover,
@@ -4110,6 +4151,11 @@ body.editor-scrollbar-dragging-x {
 }
 
 .note-list-actions .toggle-note-summary-button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.note-list-actions .note-subtree-toggle.active {
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -4292,7 +4338,8 @@ body.editor-scrollbar-dragging-x {
     --sidebar-width: 72px !important;
   }
 
-  .titlebar-count {
+  .titlebar-count,
+  .titlebar-hidden-count {
     display: none;
   }
 
@@ -5112,10 +5159,13 @@ textarea {
   font-family: var(--font-family-ui);
 }
 
-.title-input,
 .empty-editor h2,
 .modal-card h2 {
   font-size: 1.5rem;
+}
+
+.title-input {
+  font-size: 1rem;
 }
 
 .eyebrow,

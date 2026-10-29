@@ -99,6 +99,7 @@ export const api = {
     invoke<NoteInfoField[]>('SetNoteAdditionalInfo', noteId, fields),
   moveNote: (id: string, notebookId: string) => invoke<Note>('MoveNote', id, notebookId),
   setNotePinned: (id: string, pinned: boolean) => invoke<void>('SetNotePinned', id, pinned),
+  markNoteOpened: (id: string) => invoke<void>('MarkNoteOpened', id),
   setNoteTodo: (id: string, isTodo: boolean, todoDue: number, todoCompleted: number) =>
     invoke<void>('SetNoteTodo', id, isTodo, todoDue, todoCompleted),
   trashNote: (id: string) => invoke<void>('TrashNote', id),

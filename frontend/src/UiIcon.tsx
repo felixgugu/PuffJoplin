@@ -21,6 +21,14 @@ export type UiIconName =
   | 'locate'
   | 'pin'
   | 'copy'
+  | 'subtree'
+  | 'sort-title'
+  | 'sort-created'
+  | 'sort-updated'
+  | 'sort-due'
+  | 'opened-recent'
+  | 'arrow-up'
+  | 'arrow-down'
   | 'calendar'
   | 'download'
   | 'eye'
@@ -176,6 +184,58 @@ export default function UiIcon({ name, filled = false, className = '' }: UiIconP
           <path d="M13 7V5.5a1.75 1.75 0 0 0-1.75-1.75h-7A1.75 1.75 0 0 0 2.5 5.5v7A1.75 1.75 0 0 0 4.25 14H7" />
         </>
       );
+      break;
+    case 'subtree':
+      content = (
+        <>
+          <path d="M2.75 6.25h5l1.5 2h8v7.5a1.75 1.75 0 0 1-1.75 1.75H4.5a1.75 1.75 0 0 1-1.75-1.75V6.25Z" />
+          <path d="m7.75 11.25 2.25 2.25 2.25-2.25" />
+        </>
+      );
+      break;
+    case 'sort-title':
+      content = <path d="M4 15.5 10 4.5 16 15.5M6.5 11.25h7" />;
+      break;
+    case 'sort-created':
+      content = (
+        <>
+          <rect x="3" y="4.5" width="14" height="12.25" rx="2.25" />
+          <path d="M6.5 2.75v3.5M13.5 2.75v3.5M3 8.25h14" />
+          <path d="M10 10.5v4M8 12.5h4" />
+        </>
+      );
+      break;
+    case 'sort-updated':
+      content = (
+        <>
+          <circle cx="10" cy="10" r="6.5" />
+          <path d="M10 6.25V10l2.75 1.5" />
+        </>
+      );
+      break;
+    case 'sort-due':
+      content = (
+        <>
+          <rect x="3" y="4.5" width="14" height="12.25" rx="2.25" />
+          <path d="M6.5 2.75v3.5M13.5 2.75v3.5M3 8.25h14" />
+          <path d="M10 10.5v3M10 15h.01" />
+        </>
+      );
+      break;
+    case 'opened-recent':
+      content = (
+        <>
+          <path d="M16.25 10a6.25 6.25 0 1 1-1.83-4.42" />
+          <path d="M16.25 3.75v4.5h-4.5" />
+          <path d="M10 6.5V10l2.5 1.5" />
+        </>
+      );
+      break;
+    case 'arrow-up':
+      content = <path d="M10 16V4M4.75 9.25 10 4l5.25 5.25" />;
+      break;
+    case 'arrow-down':
+      content = <path d="M10 4v12M4.75 10.75 10 16l5.25-5.25" />;
       break;
     case 'calendar':
       content = (
