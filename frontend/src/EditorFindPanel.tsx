@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react';
 import type { KeyboardEventHandler, RefObject } from 'react';
+import type { EditorSearchResult } from './editorSearch';
 import UiIcon from './UiIcon';
 
 interface EditorFindPanelProps {
@@ -8,6 +10,8 @@ interface EditorFindPanelProps {
   wholeWord: boolean;
   matchCount: number;
   activeIndex: number;
+  results: EditorSearchResult[];
+  resultLimit: number;
   queryInputRef: RefObject<HTMLInputElement | null>;
   replaceInputRef: RefObject<HTMLInputElement | null>;
   onQueryChange: (value: string) => void;
@@ -18,6 +22,8 @@ interface EditorFindPanelProps {
   onNext: () => void;
   onReplace: () => void;
   onReplaceAll: () => void;
+  onSelectResult: (index: number) => void;
+  onClearQuery: () => void;
   onClose: () => void;
 }
 
@@ -28,6 +34,8 @@ export default function EditorFindPanel({
   wholeWord,
   matchCount,
   activeIndex,
+  results,
+  resultLimit,
   queryInputRef,
   replaceInputRef,
   onQueryChange,
@@ -38,8 +46,26 @@ export default function EditorFindPanel({
   onNext,
   onReplace,
   onReplaceAll,
+  onSelectResult,
+  onClearQuery,
   onClose,
 }: EditorFindPanelProps) {
+  const resultsListRef = useRef<HTMLDivElement | null>(null);
+  const activeResultRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const list = resultsListRef.current;
+    const item = activeResultRef.current;
+    if (!list || !item) return;
+    const top = item.offsetTop;
+    const bottom = top + item.offsetHeight;
+    if (top < list.scrollTop) {
+      list.scrollTop = top;
+    } else if (bottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = bottom - list.clientHeight;
+    }
+  }, [activeIndex, results]);
+
   const handleQueryKeyDown: KeyboardEventHandler<HTMLInputElement> = (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -61,6 +87,7 @@ export default function EditorFindPanel({
     }
   };
   const status = `${matchCount === 0 ? 0 : activeIndex + 1}/${matchCount}`;
+  const hasQuery = query.length > 0;
 
   return (
     <section className="editor-find-panel" role="search" aria-label="筆記內搜尋與取代">
@@ -75,6 +102,18 @@ export default function EditorFindPanel({
             onChange={(event) => onQueryChange(event.target.value)}
             onKeyDown={handleQueryKeyDown}
           />
+          {hasQuery && (
+            <button
+              type="button"
+              className="editor-find-clear"
+              title="清除搜尋"
+              aria-label="清除搜尋關鍵字"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={onClearQuery}
+            >
+              <UiIcon name="close" />
+            </button>
+          )}
         </label>
         <span className="editor-find-count" aria-live="polite">{status}</span>
         <button
@@ -153,6 +192,58 @@ export default function EditorFindPanel({
           全部取代
         </button>
       </div>
+      {hasQuery && (
+        <div className="editor-find-results" aria-label="搜尋結果">
+          {results.length > 0 ? (
+            <>
+              <div className="editor-find-results-head">
+                <span>符合內容</span>
+                <span>
+                  {matchCount > resultLimit
+                    ? `顯示前 ${resultLimit} 筆，共 ${matchCount} 筆`
+                    : `${matchCount} 筆`}
+                </span>
+              </div>
+              <div
+                ref={resultsListRef}
+                className="editor-find-results-list"
+                role="listbox"
+                aria-label="符合的筆記內容"
+              >
+                {results.map((result) => {
+                  const isActive = result.index === activeIndex;
+                  return (
+                    <button
+                      key={result.index}
+                      ref={isActive ? activeResultRef : undefined}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      className={`editor-find-result ${isActive ? 'is-active' : ''}`}
+                      onClick={() => onSelectResult(result.index)}
+                    >
+                      <span className="editor-find-result-line">{result.lineNumber}</span>
+                      <span className="editor-find-result-text">
+                        {result.hasLeadingGap && (
+                          <span className="editor-find-result-gap">…</span>
+                        )}
+                        {result.prefix}
+                        <mark className="editor-find-result-hit">{result.match}</mark>
+                        {result.suffix}
+                        {result.hasTrailingGap && (
+                          <span className="editor-find-result-gap">…</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="editor-find-empty">沒有符合的內容</div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

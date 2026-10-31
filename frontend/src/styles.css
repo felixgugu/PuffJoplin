@@ -28,6 +28,7 @@
   --accent: #315d55;
   --accent-soft: #d9e8e3;
   --accent-text: #ffffff;
+  --search-input-text: #1f5ea8;
   --danger: #a14235;
   --source-heading: #1d5fa8;
   --source-strong: #8e3c82;
@@ -70,6 +71,7 @@
   --accent: #8bc7b8;
   --accent-soft: #29423c;
   --accent-text: #14221e;
+  --search-input-text: #ffd75e;
   --danger: #ef8d7d;
   --source-heading: #79bdff;
   --source-strong: #f0a7e4;
@@ -1081,6 +1083,12 @@ button:disabled {
   --accent-soft: rgba(0, 103, 192, 0.11);
   --accent-text: #ffffff;
   --danger: #c42b1c;
+  --find-match: #ffe066;
+  --find-match-text: #2b2300;
+  --find-active: #ffc300;
+  --find-active-text: #211a00;
+  --find-line: rgba(255, 214, 0, 0.18);
+  --find-line-active: rgba(255, 214, 0, 0.32);
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
   --shadow-surface: 0 2px 8px rgba(0, 0, 0, 0.07), 0 0 1px rgba(0, 0, 0, 0.12);
   --radius: 12px;
@@ -1111,6 +1119,12 @@ button:disabled {
   --accent-soft: rgba(96, 205, 255, 0.12);
   --accent-text: #071a22;
   --danger: #ff99a4;
+  --find-match: #ffe066;
+  --find-match-text: #2b2300;
+  --find-active: #ffc300;
+  --find-active-text: #211a00;
+  --find-line: rgba(255, 214, 0, 0.14);
+  --find-line-active: rgba(255, 214, 0, 0.24);
   --shadow: 0 14px 40px rgba(0, 0, 0, 0.34);
   --shadow-surface: 0 2px 9px rgba(0, 0, 0, 0.24), 0 0 1px rgba(255, 255, 255, 0.12);
 }
@@ -1535,16 +1549,20 @@ select:focus-visible {
   top: 6px;
   right: 6px;
   display: grid;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   place-items: center;
   border-radius: 6px;
   color: var(--faint);
+  transition:
+    opacity 120ms var(--ease),
+    background-color 120ms var(--ease),
+    color 120ms var(--ease);
 }
 
 .pin-note-button svg {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   fill: currentColor;
 }
 
@@ -1559,13 +1577,17 @@ select:focus-visible {
 
 .pin-note-button:not(.active) {
   color: var(--faint);
-  opacity: 0.3;
+  opacity: 0;
+}
+
+.note-card:hover .pin-note-button:not(.active),
+.note-card:focus-within .pin-note-button:not(.active) {
+  opacity: 1;
 }
 
 .pin-note-button:not(.active):hover,
 .pin-note-button:not(.active):focus-visible {
   color: var(--muted);
-  opacity: 0.75;
 }
 
 .notebook-row.drop-target {
@@ -1681,21 +1703,109 @@ select:focus-visible {
   background: color-mix(in srgb, var(--surface) 58%, transparent);
 }
 
-.editor-tabs {
+.editor-tabs-bar {
   display: flex;
   min-height: 36px;
   flex: none;
   align-items: flex-end;
-  gap: 3px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 4px var(--editor-inline-padding) 0;
+  gap: 6px;
+  padding-left: 8px;
   border-bottom: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--surface) 42%, transparent);
 }
 
+.editor-tabs-menu {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.editor-tabs-menu:hover {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.editor-tabs-menu:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.editor-tabs {
+  display: flex;
+  min-height: 36px;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-end;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px var(--editor-inline-padding) 0 0;
+}
+
 .editor-tabs::-webkit-scrollbar {
   height: 4px;
+}
+
+.editor-tabs-menu-popover {
+  position: fixed;
+  z-index: 70;
+  width: 280px;
+  max-height: min(420px, calc(100vh - 80px));
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-strong) 96%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(30px) saturate(1.18);
+  animation: fluent-menu-in 120ms var(--ease);
+}
+
+.editor-tabs-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: baseline;
+  padding: 6px 9px;
+  border-radius: 6px;
+  color: var(--text);
+  text-align: left;
+  transition:
+    background-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+
+.editor-tabs-menu-item:hover,
+.editor-tabs-menu-item:focus-visible {
+  background: var(--surface-hover);
+  outline: 0;
+}
+
+.editor-tabs-menu-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.editor-tabs-menu-directory {
+  max-width: 55%;
+  overflow: hidden;
+  flex: none;
+  color: var(--faint);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-tabs-menu-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .editor-tab {
@@ -1753,20 +1863,31 @@ select:focus-visible {
   white-space: nowrap;
 }
 
-.editor-tab-pin,
-.editor-tab-close {
+.editor-tab-pin {
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   flex: none;
   place-items: center;
+  margin-right: 3px;
   border-radius: 5px;
   color: var(--muted);
+  opacity: 0;
+  transition:
+    opacity 120ms var(--ease),
+    background-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+
+.editor-tab:hover .editor-tab-pin,
+.editor-tab:focus-within .editor-tab-pin {
+  opacity: 1;
 }
 
 .editor-tab-pin svg {
   width: 12px;
   height: 12px;
+  min-width: 12px;
 }
 
 .editor-tab-pin.active {
@@ -1775,23 +1896,15 @@ select:focus-visible {
 
 .editor-tab-pin:not(.active) {
   color: var(--faint);
-  opacity: 0.3;
 }
 
 .editor-tab-pin:not(.active):hover {
   color: var(--muted);
-  opacity: 0.75;
 }
 
-.editor-tab-pin:hover,
-.editor-tab-close:hover {
+.editor-tab-pin:hover {
   background: var(--surface-hover);
   color: var(--text);
-}
-
-.editor-tab-close {
-  margin-right: 3px;
-  font-size: 1rem;
 }
 
 .editor-heading-main {
@@ -2225,7 +2338,7 @@ body.editor-scrollbar-dragging-x {
   top: 51px;
   right: clamp(12px, 3vw, 28px);
   display: grid;
-  width: min(500px, calc(100% - 24px));
+  width: min(560px, calc(100% - 24px));
   gap: 6px;
   padding: 8px;
   border: 1px solid var(--line);
@@ -2282,6 +2395,26 @@ body.editor-scrollbar-dragging-x {
 
 .editor-find-field input::placeholder {
   color: var(--faint);
+}
+
+.editor-find-clear {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--muted);
+}
+
+.editor-find-clear:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.editor-find-clear .ui-icon {
+  width: 12px;
+  height: 12px;
 }
 
 .editor-find-count {
@@ -2347,14 +2480,103 @@ body.editor-scrollbar-dragging-x {
   white-space: nowrap;
 }
 
+.editor-find-results {
+  display: grid;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.editor-find-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  color: var(--faint);
+  font-size: 0.74rem;
+}
+
+.editor-find-results-list {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  max-height: 180px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.editor-find-result {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: left;
+}
+
+.editor-find-result:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.editor-find-result.is-active {
+  background: var(--find-line-active);
+  color: var(--text);
+}
+
+.editor-find-result-line {
+  min-width: 2.2em;
+  flex: none;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.editor-find-result-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-find-result-gap {
+  color: var(--faint);
+}
+
+.editor-find-result-hit {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--find-match);
+  color: var(--find-match-text);
+}
+
+.editor-find-empty {
+  padding: 8px 4px 4px;
+  color: var(--faint);
+  font-size: 0.8rem;
+}
+
+::highlight(puffjoplin-find-line) {
+  background-color: var(--find-line);
+}
+
+::highlight(puffjoplin-find-line-active) {
+  background-color: var(--find-line-active);
+}
+
 ::highlight(puffjoplin-find-match) {
-  background-color: color-mix(in srgb, var(--accent) 28%, transparent);
-  color: inherit;
+  background-color: var(--find-match);
+  color: var(--find-match-text);
 }
 
 ::highlight(puffjoplin-find-active) {
-  background-color: var(--accent);
-  color: var(--accent-text);
+  background-color: var(--find-active);
+  color: var(--find-active-text);
 }
 
 @container (max-width: 600px) {
@@ -3733,7 +3955,8 @@ button.tag-capsule-empty:focus-visible {
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--search-input-text);
+  caret-color: var(--search-input-text);
   font-size: 1rem;
   line-height: 24px;
 }
@@ -7251,8 +7474,10 @@ textarea {
 }
 
 .icon-button.pin-note-button {
-  width: var(--icon-button-size);
-  height: var(--icon-button-size);
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
 }
 
 .icon-button.pin-note-button.active {
@@ -7283,8 +7508,9 @@ textarea {
 }
 
 .pin-note-button .ui-icon {
-  width: var(--icon-size);
-  height: var(--icon-size);
+  width: 13px;
+  height: 13px;
+  min-width: 13px;
 }
 
 .icon-button.collapse-note-list-button {
@@ -7292,16 +7518,11 @@ textarea {
   height: var(--icon-button-size);
 }
 
-.icon-button.editor-tab-pin,
-.icon-button.editor-tab-close {
-  width: var(--icon-button-size);
-  height: var(--icon-button-size);
-}
-
-.editor-tab-pin .ui-icon,
-.editor-tab-close .ui-icon {
-  width: var(--icon-size);
-  height: var(--icon-size);
+.icon-button.editor-tab-pin {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
 }
 
 .icon-button.tag-editor-remove {
@@ -8320,6 +8541,7 @@ html[data-theme="dark"] .todo-due-field input {
 :is(html[data-vditor-fullscreen="true"], html:has(.vditor--fullscreen)) .note-list-panel,
 :is(html[data-vditor-fullscreen="true"], html:has(.vditor--fullscreen)) .resizer,
 :is(html[data-vditor-fullscreen="true"], html:has(.vditor--fullscreen)) .editor-tabs,
+:is(html[data-vditor-fullscreen="true"], html:has(.vditor--fullscreen)) .editor-tabs-bar,
 :is(html[data-vditor-fullscreen="true"], html:has(.vditor--fullscreen)) .editor-heading,
 :is(html[data-vditor-fullscreen="true"], html:has(.vditor--fullscreen)) .editor-footer,
 :is(html[data-vditor-fullscreen="true"], html:has(.vditor--fullscreen)) .trash-banner {

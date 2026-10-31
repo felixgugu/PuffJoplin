@@ -19,7 +19,13 @@ import {
   syntaxTree,
   unfoldAll as unfoldAllCommand,
 } from '@codemirror/language';
-import { Compartment, EditorState, RangeSetBuilder } from '@codemirror/state';
+import {
+  Compartment,
+  EditorState,
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+} from '@codemirror/state';
 import {
   Decoration,
   drawSelection,
@@ -182,6 +188,67 @@ const codeBlockBackgroundPlugin = ViewPlugin.fromClass(
   },
 );
 
+interface SourceSearchState {
+  matches: readonly { from: number; to: number }[];
+  activeIndex: number;
+}
+
+const setSearchResultsEffect = StateEffect.define<SourceSearchState | null>();
+
+const searchLineDecoration = Decoration.line({ class: 'puff-source-find-line' });
+const searchActiveLineDecoration = Decoration.line({
+  class: 'puff-source-find-line-active',
+});
+const searchMatchDecoration = Decoration.mark({ class: 'puff-source-find-match' });
+const searchActiveMatchDecoration = Decoration.mark({
+  class: 'puff-source-find-active',
+});
+
+function buildSearchDecorations(
+  state: EditorState,
+  search: SourceSearchState | null,
+): DecorationSet {
+  if (!search || search.matches.length === 0) return Decoration.none;
+  const ranges: ReturnType<typeof searchLineDecoration.range>[] = [];
+  const linePositions = new Set<number>();
+  const length = state.doc.length;
+  search.matches.forEach((match, index) => {
+    const from = Math.max(0, Math.min(match.from, length));
+    const to = Math.max(from, Math.min(match.to, length));
+    if (to <= from) return;
+    const line = state.doc.lineAt(from);
+    if (!linePositions.has(line.from)) {
+      linePositions.add(line.from);
+      ranges.push(searchLineDecoration.range(line.from));
+    }
+    ranges.push(
+      (index === search.activeIndex
+        ? searchActiveMatchDecoration
+        : searchMatchDecoration).range(from, to),
+    );
+  });
+  const active = search.matches[search.activeIndex];
+  if (active) {
+    const position = Math.max(0, Math.min(active.from, length));
+    ranges.push(searchActiveLineDecoration.range(state.doc.lineAt(position).from));
+  }
+  return Decoration.set(ranges, true);
+}
+
+const searchHighlightField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(decorations, transaction) {
+    let next = decorations.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (effect.is(setSearchResultsEffect)) {
+        next = buildSearchDecorations(transaction.state, effect.value);
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 const editorTheme = EditorView.theme({
   '&': {
     height: '100%',
@@ -218,6 +285,22 @@ const editorTheme = EditorView.theme({
     borderRadius: '4px',
     backgroundColor: 'var(--source-inline-code-background)',
     color: 'var(--source-inline-code)',
+  },
+  '.puff-source-find-line': {
+    backgroundColor: 'var(--find-line)',
+  },
+  '.puff-source-find-line-active': {
+    backgroundColor: 'var(--find-line-active)',
+  },
+  '.puff-source-find-match, .puff-source-find-match *': {
+    borderRadius: '3px',
+    backgroundColor: 'var(--find-match) !important',
+    color: 'var(--find-match-text) !important',
+  },
+  '.puff-source-find-active, .puff-source-find-active *': {
+    borderRadius: '3px',
+    backgroundColor: 'var(--find-active) !important',
+    color: 'var(--find-active-text) !important',
   },
   '.cm-gutters': {
     border: 'none',
@@ -369,6 +452,7 @@ export class CodeMirrorSource {
           foldGutter({ markerDOM: foldMarkerDOM }),
           inlineCodeBackgroundPlugin,
           codeBlockBackgroundPlugin,
+          searchHighlightField,
           this.lineNumbersCompartment.of(options.showLineNumbers ? lineNumbers() : []),
           markdown(),
           syntaxHighlighting(markdownHighlightStyle),
@@ -495,6 +579,32 @@ export class CodeMirrorSource {
       effects: this.wordWrapCompartment.reconfigure(
         enabled ? EditorView.lineWrapping : [],
       ),
+    });
+  }
+
+  setSearchResults(
+    matches: readonly CodeMirrorSelection[],
+    activeIndex: number,
+  ) {
+    if (this.destroyed) return;
+    this.view.dispatch({
+      effects: setSearchResultsEffect.of({
+        matches: matches.map((match) => ({ from: match.from, to: match.to })),
+        activeIndex,
+      }),
+    });
+  }
+
+  clearSearchResults() {
+    if (this.destroyed) return;
+    this.view.dispatch({ effects: setSearchResultsEffect.of(null) });
+  }
+
+  revealSearchMatch(match: CodeMirrorSelection | undefined) {
+    if (this.destroyed || !match) return;
+    const position = Math.max(0, Math.min(match.from, this.view.state.doc.length));
+    this.view.dispatch({
+      effects: EditorView.scrollIntoView(position, { y: 'center' }),
     });
   }
 

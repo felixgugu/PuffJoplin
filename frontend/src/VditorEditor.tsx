@@ -40,12 +40,15 @@ import { EditorViewportController } from './editorViewportController';
 import { useConfirmDialog } from './useConfirmDialog';
 import {
   applySearchHighlights,
+  buildSearchResults,
   clearSearchHighlights,
   createSearchableTextMap,
   findTextMatches,
+  rangesForMatchLines,
   rangesForTextMatches,
   replaceRangesWithText,
   scrollRangeIntoView,
+  type EditorSearchResult,
   type EditorTextMatch,
 } from './editorSearch';
 import {
@@ -75,6 +78,7 @@ import type { Resource } from './types';
 const vditorRoot = '/vditor/dist';
 const contentThemePath = `${vditorRoot}/css/content-theme`;
 const maxUploadBytes = 50 * 1024 * 1024;
+const findResultLimit = 200;
 
 function toolbarIconItem(name: ToolbarIconName) {
   return { name, icon: toolbarIcon(name) };
@@ -88,6 +92,10 @@ function uploadErrorMessage(value: string): string {
     // Vditor may pass a plain response or a transport error.
   }
   return value || '請稍後再試';
+}
+
+function sourceSearchSelections(matches: readonly EditorTextMatch[]) {
+  return matches.map((match) => ({ from: match.start, to: match.end }));
 }
 
 function applyEditorTheme(editor: Vditor, theme: 'light' | 'dark') {
@@ -274,6 +282,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const [findWholeWord, setFindWholeWord] = useState(false);
   const [findMatchCount, setFindMatchCount] = useState(0);
   const [findActiveIndex, setFindActiveIndex] = useState(0);
+  const [findResults, setFindResults] = useState<EditorSearchResult[]>([]);
   const [mediaContext, setMediaContext] = useState<EditorMediaContextTarget | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [sourceLinePreview, setSourceLinePreview] = useState<{
@@ -291,8 +300,13 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const findReplacementInputRef = useRef<HTMLInputElement | null>(null);
   const findActiveIndexRef = useRef(0);
   const findRangesRef = useRef<Range[]>([]);
+  const findLineRangesRef = useRef<Range[]>([]);
+  const findMatchLineIndexesRef = useRef<number[]>([]);
   const findSourceMatchesRef = useRef<EditorTextMatch[]>([]);
   const findSourceTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const findOpenRef = useRef(false);
+  const findQueryRef = useRef('');
+  const findRefreshSignatureRef = useRef('');
   const refreshFindRef = useRef<(resetActive: boolean) => void>(() => undefined);
   const openFindRef = useRef<(field: 'query' | 'replace') => void>(() => undefined);
   const closeFindRef = useRef<() => void>(() => undefined);
@@ -322,21 +336,35 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   resourcesRef.current = resources;
   valueRef.current = value;
   noteTitleRef.current = noteTitle;
+  findOpenRef.current = findOpen;
+  findQueryRef.current = findQuery;
 
   const closeSourceLinePreview = useCallback(() => {
     setSourceLinePreview(null);
   }, []);
 
+  const currentEditorMarkdown = useCallback((): string => {
+    const sourceValue = editorRef.current?.getCurrentMode() === 'sv'
+      ? sourceEditorRef.current?.getValue()
+      : undefined;
+    return sourceValue ?? toEditorMarkdown(valueRef.current, resourcesRef.current);
+  }, []);
+
   const openSourceGallery = useCallback(() => {
-    const markdown = sourceEditorRef.current?.getValue() ??
-      toEditorMarkdown(valueRef.current, resourcesRef.current);
+    const markdown = currentEditorMarkdown();
+    const source = sourceEditorRef.current;
+    if (editorRef.current?.getCurrentMode() !== 'sv' && source &&
+      source.getValue() !== markdown) {
+      // 即時渲染／所見即所得初次開啟時原始碼編輯器仍是空的，先同步再開相簿。
+      source.setValue(markdown);
+    }
     const items = findSourcePreviewItems(markdown);
     if (items.length === 0) {
       editorRef.current?.tip('此筆記沒有可顯示的圖片或 Mermaid', 3200);
       return;
     }
     setSourceLinePreview({ target: items[0] });
-  }, []);
+  }, [currentEditorMarkdown]);
   openSourceGalleryRef.current = openSourceGallery;
 
   const handleSourceLineActivate = useCallback((line: CodeMirrorLineActivation | null) => {
@@ -413,18 +441,26 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
 
   const refreshFind = useCallback((resetActive: boolean) => {
     const editor = editorRef.current;
-    if (!findOpen || !readyRef.current || !editor) {
+    if (!findQuery || !readyRef.current || !editor) {
       clearSearchHighlights();
+      sourceEditorRef.current?.clearSearchResults();
       findRangesRef.current = [];
+      findLineRangesRef.current = [];
+      findMatchLineIndexesRef.current = [];
       findSourceMatchesRef.current = [];
+      findSourceTextareaRef.current = null;
+      setFindResults([]);
       setFindMatchCount(0);
       setFindActiveMatch(0);
       return;
     }
     const requestedIndex = resetActive ? 0 : findActiveIndexRef.current;
     if (editor.getCurrentMode() === 'sv') {
+      findLineRangesRef.current = [];
+      findMatchLineIndexesRef.current = [];
       if (sourceEditorRef.current) {
-        const matches = findTextMatches(sourceEditorRef.current.getValue(), findQuery, {
+        const value = sourceEditorRef.current.getValue();
+        const matches = findTextMatches(value, findQuery, {
           matchCase: findMatchCase,
           wholeWord: findWholeWord,
         });
@@ -432,13 +468,17 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         findRangesRef.current = [];
         findSourceMatchesRef.current = matches;
         findSourceTextareaRef.current = null;
+        setFindResults(buildSearchResults(value, matches, findResultLimit));
         const index = matches.length === 0
           ? 0
           : Math.max(0, Math.min(requestedIndex, matches.length - 1));
         setFindMatchCount(matches.length);
         setFindActiveMatch(index);
-        const match = matches[index];
-        if (match) sourceEditorRef.current.selectRange(match.start, match.end);
+        const sourceSelections = sourceSearchSelections(matches);
+        sourceEditorRef.current.setSearchResults(sourceSelections, index);
+        if (findOpenRef.current) {
+          sourceEditorRef.current.revealSearchMatch(sourceSelections[index]);
+        }
         return;
       }
       const textarea = editor.vditor.sv?.element;
@@ -451,17 +491,21 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       findRangesRef.current = [];
       findSourceMatchesRef.current = matches;
       findSourceTextareaRef.current = textarea;
+      setFindResults(buildSearchResults(textarea.value, matches, findResultLimit));
       const index = matches.length === 0
         ? 0
         : Math.max(0, Math.min(requestedIndex, matches.length - 1));
       setFindMatchCount(matches.length);
       setFindActiveMatch(index);
-      revealSourceMatch(textarea, matches, index);
+      if (findOpenRef.current) {
+        revealSourceMatch(textarea, matches, index);
+      }
       return;
     }
 
     findSourceMatchesRef.current = [];
     findSourceTextareaRef.current = null;
+    sourceEditorRef.current?.clearSearchResults();
     const mode = editor.getCurrentMode();
     const root = mode === 'wysiwyg'
       ? editor.vditor.wysiwyg?.element
@@ -473,21 +517,29 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       wholeWord: findWholeWord,
     });
     const ranges = rangesForTextMatches(textMap, textMatches);
+    const lineInfo = rangesForMatchLines(textMap, textMatches);
     const index = ranges.length === 0
       ? 0
       : Math.max(0, Math.min(requestedIndex, ranges.length - 1));
     findRangesRef.current = ranges;
+    findLineRangesRef.current = lineInfo.ranges;
+    findMatchLineIndexesRef.current = lineInfo.matchLineIndexes;
+    setFindResults(buildSearchResults(textMap.text, textMatches, findResultLimit));
     setFindMatchCount(ranges.length);
     setFindActiveMatch(index);
     if (ranges.length > 0) {
-      applySearchHighlights(ranges, index);
-      scrollRangeIntoView(ranges[index]);
+      applySearchHighlights(
+        ranges,
+        index,
+        lineInfo.ranges,
+        lineInfo.matchLineIndexes[index] ?? -1,
+      );
+      if (findOpenRef.current) scrollRangeIntoView(ranges[index]);
     } else {
       clearSearchHighlights();
     }
   }, [
     findMatchCase,
-    findOpen,
     findQuery,
     findWholeWord,
     revealSourceMatch,
@@ -497,7 +549,10 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
 
   const openFindPanel = useCallback((field: 'query' | 'replace') => {
     const selection = editorRef.current?.getSelection()?.trim() || '';
-    if (selection && !selection.includes('\n') && selection.length <= 200) {
+    if (!findQueryRef.current.trim() &&
+      selection &&
+      !selection.includes('\n') &&
+      selection.length <= 200) {
       setFindQuery(selection);
     }
     setFindOpen(true);
@@ -515,30 +570,30 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
 
   const closeFindPanel = useCallback(() => {
     setFindOpen(false);
-    setFindQuery('');
-    setFindReplacement('');
-    setFindMatchCase(false);
-    setFindWholeWord(false);
-    setFindMatchCount(0);
-    setFindActiveMatch(0);
-    findRangesRef.current = [];
-    findSourceMatchesRef.current = [];
-    findSourceTextareaRef.current = null;
-    clearSearchHighlights();
-  }, [setFindActiveMatch]);
+  }, []);
   closeFindRef.current = closeFindPanel;
 
-  const navigateFind = useCallback((direction: -1 | 1) => {
-    const count = findMatchCount;
-    if (count === 0) {
-      refreshFindRef.current(true);
-      return;
-    }
-    const index = (findActiveIndexRef.current + direction + count) % count;
+  const clearFindQuery = useCallback(() => {
+    setFindQuery('');
+    clearSearchHighlights();
+    sourceEditorRef.current?.clearSearchResults();
+    findRangesRef.current = [];
+    findLineRangesRef.current = [];
+    findMatchLineIndexesRef.current = [];
+    findSourceMatchesRef.current = [];
+    findSourceTextareaRef.current = null;
+    setFindResults([]);
+    setFindMatchCount(0);
+    setFindActiveMatch(0);
+    window.requestAnimationFrame(() => findQueryInputRef.current?.focus());
+  }, [setFindActiveMatch]);
+
+  const revealFindMatch = useCallback((index: number) => {
     setFindActiveMatch(index);
     if (editorRef.current?.getCurrentMode() === 'sv' && sourceEditorRef.current) {
-      const match = findSourceMatchesRef.current[index];
-      if (match) sourceEditorRef.current.selectRange(match.start, match.end);
+      const selections = sourceSearchSelections(findSourceMatchesRef.current);
+      sourceEditorRef.current.setSearchResults(selections, index);
+      sourceEditorRef.current.revealSearchMatch(selections[index]);
       return;
     }
     if (findSourceTextareaRef.current) {
@@ -549,9 +604,24 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
       );
       return;
     }
-    applySearchHighlights(findRangesRef.current, index);
+    applySearchHighlights(
+      findRangesRef.current,
+      index,
+      findLineRangesRef.current,
+      findMatchLineIndexesRef.current[index] ?? -1,
+    );
     scrollRangeIntoView(findRangesRef.current[index]);
-  }, [findMatchCount, revealSourceMatch, setFindActiveMatch]);
+  }, [revealSourceMatch, setFindActiveMatch]);
+
+  const navigateFind = useCallback((direction: -1 | 1) => {
+    const count = findMatchCount;
+    if (count === 0) {
+      refreshFindRef.current(true);
+      return;
+    }
+    const index = (findActiveIndexRef.current + direction + count) % count;
+    revealFindMatch(index);
+  }, [findMatchCount, revealFindMatch]);
 
   const dispatchEditorInput = useCallback((
     element: HTMLElement | HTMLTextAreaElement,
@@ -921,9 +991,14 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
 
   useEffect(() => {
     if (!findOpen) return undefined;
-    const frame = window.requestAnimationFrame(() => refreshFind(true));
+    const frame = window.requestAnimationFrame(() => {
+      const signature = `${findQuery}\u0000${findMatchCase}\u0000${findWholeWord}`;
+      const changed = findRefreshSignatureRef.current !== signature;
+      findRefreshSignatureRef.current = signature;
+      refreshFindRef.current(changed);
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [findOpen, refreshFind]);
+  }, [findMatchCase, findOpen, findQuery, findWholeWord]);
 
   useEffect(() => {
     const handleFindShortcut = (event: KeyboardEvent) => {
@@ -1389,7 +1464,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         codeMirrorSource = new CodeMirrorSource({
           parent: content,
           textarea: sourceTextarea,
-          value: sourceTextarea.value,
+          value: sourceTextarea.value || toEditorMarkdown(valueRef.current, resourcesRef.current),
           showLineNumbers: showSourceLineNumbersRef.current,
           wordWrap: sourceWordWrapRef.current,
           onOutlineChange: (headings, activeHeading) => {
@@ -1813,8 +1888,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   }, [resources, value]);
 
   const sourcePreviewMarkdown = sourceLinePreview
-    ? sourceEditorRef.current?.getValue() ??
-      toEditorMarkdown(valueRef.current, resourcesRef.current)
+    ? currentEditorMarkdown()
     : '';
   const sourcePreviewItems = sourceLinePreview
     ? findSourcePreviewItems(sourcePreviewMarkdown)
@@ -1851,6 +1925,8 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           wholeWord={findWholeWord}
           matchCount={findMatchCount}
           activeIndex={findActiveIndex}
+          results={findResults}
+          resultLimit={findResultLimit}
           queryInputRef={findQueryInputRef}
           replaceInputRef={findReplacementInputRef}
           onQueryChange={setFindQuery}
@@ -1861,6 +1937,8 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
           onNext={() => navigateFind(1)}
           onReplace={replaceFindMatch}
           onReplaceAll={replaceAllFindMatches}
+          onSelectResult={revealFindMatch}
+          onClearQuery={clearFindQuery}
           onClose={closeFindPanel}
         />
       )}

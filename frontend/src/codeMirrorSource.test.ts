@@ -268,3 +268,32 @@ describe('CodeMirror range updates', () => {
     expect(reports.at(-1)?.activeHeading?.label).toBe('Two');
   });
 });
+
+describe('CodeMirror search highlights', () => {
+  it('marks matching lines, the active line and the active match', () => {
+    const editor = createSource('alpha\nbeta alpha\ngamma');
+    const first = editor.getValue().indexOf('alpha');
+    const second = editor.getValue().indexOf('alpha', first + 1);
+    const outsideButton = document.createElement('button');
+    document.body.append(outsideButton);
+    outsideButton.focus();
+
+    editor.setSearchResults([
+      { from: first, to: first + 5 },
+      { from: second, to: second + 5 },
+    ], 1);
+
+    expect(editor.element.querySelectorAll('.puff-source-find-line')).toHaveLength(2);
+    expect(editor.element.querySelectorAll('.puff-source-find-line-active'))
+      .toHaveLength(1);
+    expect(editor.element.querySelectorAll('.puff-source-find-match')).toHaveLength(1);
+    expect(editor.element.querySelectorAll('.puff-source-find-active')).toHaveLength(1);
+
+    editor.revealSearchMatch({ from: second, to: second + 5 });
+    expect(document.activeElement).toBe(outsideButton);
+
+    editor.clearSearchResults();
+    expect(editor.element.querySelectorAll('.puff-source-find-line')).toHaveLength(0);
+    expect(editor.element.querySelectorAll('.puff-source-find-match')).toHaveLength(0);
+  });
+});
