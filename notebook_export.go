@@ -16,6 +16,7 @@ import (
 )
 
 const maxNotebookDocxBytes = 512 << 20
+const maxXlsxExportBytes = 128 << 20
 
 var localResourceReferencePattern = regexp.MustCompile(
 	`(^|[^A-Za-z0-9])(?:/resources/|:/)([A-Za-z0-9]{32})`,

@@ -304,5 +304,13 @@
     "file": "svg/text-width.svg",
     "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/text-width.svg",
     "origin": "Font Awesome Free Classic Solid"
+  },
+  {
+    "position": 39,
+    "label": "表格總覽",
+    "icon": "table-cells-large",
+    "file": "svg/table-cells-large.svg",
+    "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/7.x/svgs/solid/table-cells-large.svg",
+    "origin": "Font Awesome Free Classic Solid"
   }
 ]

@@ -12,18 +12,18 @@ export interface MarkdownTableFormatResult {
   matchedCount: number;
 }
 
-interface SourceLine {
+export interface SourceLine {
   end: number;
   start: number;
   text: string;
 }
 
-interface TableBlock {
+export interface TableBlock {
   from: number;
   to: number;
 }
 
-interface TableRow {
+export interface TableRow {
   cells: string[];
   hasPipe: boolean;
 }
@@ -66,7 +66,7 @@ export function markdownTableDisplayWidth(value: string): number {
   return width;
 }
 
-function splitTableRow(line: string): TableRow {
+export function splitTableRow(line: string): TableRow {
   const value = line.trim();
   const cells: string[] = [];
   let cell = '';
@@ -109,7 +109,7 @@ function splitTableRow(line: string): TableRow {
   return { cells, hasPipe };
 }
 
-function delimiterAlignments(line: string): MarkdownTableAlignment[] | null {
+export function delimiterAlignments(line: string): MarkdownTableAlignment[] | null {
   const row = splitTableRow(line);
   if (row.cells.length === 0) return null;
   const alignments: MarkdownTableAlignment[] = [];
@@ -123,7 +123,7 @@ function delimiterAlignments(line: string): MarkdownTableAlignment[] | null {
   return alignments;
 }
 
-function sourceLines(markdown: string): SourceLine[] {
+export function sourceLines(markdown: string): SourceLine[] {
   const lines: SourceLine[] = [];
   let start = 0;
   while (start <= markdown.length) {
@@ -138,7 +138,7 @@ function sourceLines(markdown: string): SourceLine[] {
   return lines;
 }
 
-function tableBlocks(markdown: string): TableBlock[] {
+export function tableBlocks(markdown: string): TableBlock[] {
   const lines = sourceLines(markdown);
   const blocks: TableBlock[] = [];
   let fenceCharacter = '';

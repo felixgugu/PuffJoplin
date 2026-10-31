@@ -141,6 +141,9 @@ export const api = {
   saveResourceAs: (id: string) => invoke<string>('SaveResourceAs', id),
   saveImageAs: (filename: string, dataBase64: string) =>
     invoke<string>('SaveImageAs', filename, dataBase64),
+  saveXlsxAs: (filename: string, dataBase64: string) =>
+    invoke<string>('SaveXlsxAs', filename, dataBase64),
+  openFilePath: (path: string) => invoke<void>('OpenFilePath', path),
   openExternal: (url: string) => invoke<void>('OpenExternal', url),
   openDataFolder: () => invoke<void>('OpenDataFolder'),
 };

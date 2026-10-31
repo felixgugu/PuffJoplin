@@ -1755,7 +1755,9 @@ select:focus-visible {
 .editor-tabs-menu-popover {
   position: fixed;
   z-index: 70;
-  width: 280px;
+  width: fit-content;
+  min-width: 280px;
+  max-width: min(480px, calc(100vw - 16px));
   max-height: min(420px, calc(100vh - 80px));
   overflow-y: auto;
   padding: 5px;
@@ -1771,6 +1773,7 @@ select:focus-visible {
   display: flex;
   width: 100%;
   min-height: 32px;
+  flex-wrap: wrap;
   align-items: baseline;
   padding: 6px 9px;
   border-radius: 6px;
@@ -1803,9 +1806,10 @@ select:focus-visible {
 }
 
 .editor-tabs-menu-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .editor-tab {
@@ -3714,6 +3718,215 @@ button.tag-capsule-empty:focus-visible {
   color: var(--accent-text);
 }
 
+.table-overview-dialog {
+  display: flex;
+  width: min(1080px, calc(100vw - 32px));
+  height: min(86vh, 900px);
+  max-width: none;
+  max-height: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.table-overview-dialog.is-maximized {
+  width: calc(100vw - 24px);
+  height: calc(100vh - 24px);
+}
+
+.table-overview-dialog > header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 12px;
+}
+
+.table-overview-dialog > header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.table-overview-meta {
+  display: flex;
+  min-height: 30px;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 0 22px 8px;
+  color: var(--faint);
+  font-size: 0.76rem;
+}
+
+.table-overview-heading {
+  overflow: hidden;
+  min-width: 0;
+  max-width: 45%;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-overview-body {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  padding: 0 40px;
+}
+
+.table-overview-scroll {
+  min-width: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.table-overview-table {
+  min-width: 100%;
+  border-collapse: collapse;
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.table-overview-table th,
+.table-overview-table td {
+  min-width: 72px;
+  max-width: 320px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-soft);
+  overflow-wrap: anywhere;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+
+.table-overview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  font-weight: 650;
+}
+
+.table-overview-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-hover) 48%, transparent);
+}
+
+.table-overview-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-strong) 92%, transparent);
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+
+.table-overview-nav:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.table-overview-nav.previous {
+  left: 4px;
+}
+
+.table-overview-nav.next {
+  right: 4px;
+}
+
+.table-overview-nav .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.table-overview-nav.previous .ui-icon {
+  transform: rotate(180deg);
+}
+
+.table-overview-switcher {
+  display: flex;
+  flex: none;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 10px 22px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.table-overview-switcher-item {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.table-overview-switcher-item:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.table-overview-switcher-item.is-active {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.table-overview-switcher-item small {
+  color: var(--faint);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-overview-dialog > footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 10px 22px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.table-overview-dialog > footer > span {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-overview-dialog > footer > span.is-error {
+  color: var(--danger);
+}
+
+@media (max-width: 760px) {
+  .table-overview-dialog {
+    width: calc(100vw - 20px);
+    height: min(90vh, 760px);
+  }
+
+  .table-overview-body {
+    padding: 0 34px;
+  }
+}
+
 .report-stats {
   border-color: var(--line);
   border-radius: 8px;
@@ -4985,7 +5198,8 @@ button.tag-capsule-empty:focus-visible {
   white-space: nowrap;
 }
 
-.source-line-preview-actions {
+.source-line-preview-actions,
+.table-overview-header-actions {
   display: flex;
   flex: none;
   flex-wrap: wrap;
@@ -4995,7 +5209,8 @@ button.tag-capsule-empty:focus-visible {
   line-height: 1;
 }
 
-.source-line-preview-actions button {
+.source-line-preview-actions button,
+.table-overview-header-actions button {
   display: grid;
   width: 28px;
   height: 28px;
@@ -5008,17 +5223,21 @@ button.tag-capsule-empty:focus-visible {
   line-height: 1;
 }
 
-.source-line-preview-actions button:hover {
+.source-line-preview-actions button:hover,
+.table-overview-header-actions button:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.source-line-preview-actions button:disabled {
+.source-line-preview-actions button:disabled,
+.table-overview-header-actions button:disabled {
   opacity: 0.42;
 }
 
 .source-line-preview-actions button svg,
-.source-line-preview-actions button .ui-icon {
+.source-line-preview-actions button .ui-icon,
+.table-overview-header-actions button svg,
+.table-overview-header-actions button .ui-icon {
   width: 15px;
   height: 15px;
   fill: none;

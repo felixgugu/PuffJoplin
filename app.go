@@ -1000,6 +1000,58 @@ func sanitizePreviewImageFilename(filename string) string {
 	return strings.TrimSuffix(filename, filepath.Ext(filename)) + ".png"
 }
 
+func decodeXlsxExport(dataBase64 string) ([]byte, error) {
+	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(dataBase64))
+	if err != nil {
+		return nil, fmt.Errorf("Excel 資料格式錯誤: %w", err)
+	}
+	if len(data) < 4 || len(data) > maxXlsxExportBytes || string(data[:4]) != "PK\x03\x04" {
+		return nil, errors.New("Excel 內容無效或檔案過大")
+	}
+	return data, nil
+}
+
+func (a *App) SaveXlsxAs(filename string, dataBase64 string) (string, error) {
+	data, err := decodeXlsxExport(dataBase64)
+	if err != nil {
+		return "", err
+	}
+	filename = safeExportName(filename, "PuffJoplin-表格.xlsx")
+	if !strings.EqualFold(filepath.Ext(filename), ".xlsx") {
+		filename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".xlsx"
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "匯出表格為 Excel",
+		DefaultFilename: filename,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Excel 活頁簿", Pattern: "*.xlsx"},
+		},
+	})
+	if err != nil || path == "" {
+		return path, err
+	}
+	path = ensureFileExtension(path, ".xlsx")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", fmt.Errorf("儲存 Excel 失敗: %w", err)
+	}
+	return path, nil
+}
+
+func (a *App) OpenFilePath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" || !filepath.IsAbs(path) {
+		return errors.New("檔案路徑無效")
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return errors.New("找不到要開啟的檔案")
+	}
+	if !strings.EqualFold(filepath.Ext(path), ".xlsx") {
+		return errors.New("只允許開啟匯出的 Excel 檔案")
+	}
+	return exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", path).Start()
+}
+
 func (a *App) OpenExternal(value string) error {
 	parsed, err := url.Parse(value)
 	if err != nil {

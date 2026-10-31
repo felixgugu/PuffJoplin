@@ -28,7 +28,6 @@ import {
 import FreeNumberInput from './FreeNumberInput';
 import {
   activateEditorTab as activateEditorTabState,
-  closeEditorTab,
   editorModeForTab,
   EDITOR_TABS_KEY,
   loadEditorTabs,
@@ -1044,6 +1043,21 @@ export default function App() {
     }
     return labels;
   }, [listNotebookID, notebooks, visibleNotes]);
+  const openTabDirectories = useMemo(() => {
+    const directories: Record<string, string> = {};
+    const notebookTitles = new Map(
+      notebooks.map((notebook) => [notebook.id, notebook.title.trim()]),
+    );
+    const tabs = editorTabs.preview
+      ? [...editorTabs.pinned, editorTabs.preview]
+      : editorTabs.pinned;
+    for (const tab of tabs) {
+      const note = editorNoteCache[tab.id];
+      const title = note ? notebookTitles.get(note.notebookId) : '';
+      if (title) directories[tab.id] = title;
+    }
+    return directories;
+  }, [editorNoteCache, editorTabs, notebooks]);
 
   useEffect(() => {
     setSelectedNoteTag('');
@@ -1409,21 +1423,6 @@ export default function App() {
   const toggleOpenTabPin = useCallback((id: string) => {
     setEditorTabs((tabs) => toggleEditorTabPin(tabs, id));
   }, []);
-
-  const closeOpenTab = useCallback(async (id: string) => {
-    const tabs = editorTabsRef.current;
-    const wasActive = tabs.activeID === id;
-    if (wasActive && dirtyRef.current) {
-      const saved = await saveCurrent();
-      if (!saved) return;
-    }
-    const nextTabs = closeEditorTab(tabs, id);
-    setEditorTabs(nextTabs);
-    forgetEditorNotes([id]);
-    if (!wasActive) return;
-    if (nextTabs.activeID) await activateEditorTab(nextTabs.activeID, false);
-    else setCurrent(emptyNote);
-  }, [activateEditorTab, forgetEditorNotes, saveCurrent]);
 
   const createWelcomeNote = useCallback(async () => {
     const page = await api.listNotes({ view: 'all', limit: 1, offset: 0 });
@@ -3457,9 +3456,9 @@ export default function App() {
         {current.id && (
           <EditorTabBar
             tabs={editorTabs}
+            directories={openTabDirectories}
             onActivate={(id) => void activateEditorTab(id)}
             onTogglePin={toggleOpenTabPin}
-            onClose={(id) => void closeOpenTab(id)}
             onIntent={prewarmEditor}
           />
         )}

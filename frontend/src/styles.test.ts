@@ -332,6 +332,53 @@ describe('stylesheet structure', () => {
     ).toBe('22px');
   });
 
+  it('tints the global search input text per theme', () => {
+    const declarationsBySelector = new Map<string, Map<string, string>>();
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const selector = rule.selector.replace(/\s+/g, ' ');
+      const declarations = declarationsBySelector.get(selector) ?? new Map<string, string>();
+      for (const node of rule.nodes) {
+        if (node.type === 'decl') declarations.set(node.prop, node.value);
+      }
+      declarationsBySelector.set(selector, declarations);
+    });
+
+    expect(declarationsBySelector.get(':root')?.get('--search-input-text')).toBe('#1f5ea8');
+    expect(
+      declarationsBySelector.get(':root[data-theme="dark"]')?.get('--search-input-text'),
+    ).toBe('#ffd75e');
+    expect(declarationsBySelector.get('.titlebar-search input')?.get('color'))
+      .toBe('var(--search-input-text)');
+    expect(declarationsBySelector.get('.titlebar-search input')?.get('caret-color'))
+      .toBe('var(--search-input-text)');
+  });
+
+  it('reveals a compact tab pin on hover without a close button', () => {
+    const declarationsBySelector = new Map<string, Map<string, string>>();
+    const selectors: string[] = [];
+    root.walkRules((rule) => {
+      if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
+      const selector = rule.selector.replace(/\s+/g, ' ');
+      selectors.push(...rule.selectors.map((item) => item.replace(/\s+/g, ' ')));
+      const declarations = declarationsBySelector.get(selector) ?? new Map<string, string>();
+      for (const node of rule.nodes) {
+        if (node.type === 'decl') declarations.set(node.prop, node.value);
+      }
+      declarationsBySelector.set(selector, declarations);
+    });
+
+    expect(declarationsBySelector.get('.editor-tab-pin')?.get('opacity')).toBe('0');
+    expect(
+      declarationsBySelector.get(
+        '.editor-tab:hover .editor-tab-pin, .editor-tab:focus-within .editor-tab-pin',
+      )?.get('opacity'),
+    ).toBe('1');
+    expect(declarationsBySelector.get('.icon-button.editor-tab-pin')?.get('width')).toBe('20px');
+    expect(declarationsBySelector.get('.editor-tab-pin svg')?.get('width')).toBe('12px');
+    expect(selectors.some((selector) => selector.includes('.editor-tab-close'))).toBe(false);
+  });
+
   it('keeps editor actions in the footer with a compact hoverable export menu', () => {
     const selectors: string[] = [];
     let headingPadding = '';
@@ -501,6 +548,10 @@ describe('stylesheet structure', () => {
     let activeBackground = '';
     let normalTop = '';
     let compactTop = '';
+    let buttonSize = '';
+    let iconSize = '';
+    let unpinnedOpacity = '';
+    let revealedOpacity = '';
     root.walkRules((rule) => {
       if (rule.parent?.type === 'atrule' && rule.parent.name === 'keyframes') return;
       const declarations = new Map(
@@ -517,11 +568,30 @@ describe('stylesheet structure', () => {
       if (rule.selectors.includes('.note-list.is-compact .icon-button.pin-note-button')) {
         compactTop = declarations.get('top') || '';
       }
+      if (rule.selectors.includes('.icon-button.pin-note-button')) {
+        buttonSize = declarations.get('width') || '';
+      }
+      if (rule.selectors.includes('.pin-note-button .ui-icon')) {
+        iconSize = declarations.get('width') || '';
+      }
+      if (rule.selectors.includes('.pin-note-button:not(.active)')) {
+        unpinnedOpacity = declarations.get('opacity') || '';
+      }
+      if (
+        rule.selectors.includes('.note-card:hover .pin-note-button:not(.active)') &&
+        rule.selectors.includes('.note-card:focus-within .pin-note-button:not(.active)')
+      ) {
+        revealedOpacity = declarations.get('opacity') || '';
+      }
     });
 
     expect(activeBackground).toBe('transparent');
     expect(normalTop).toBe('4px');
     expect(compactTop).toBe('1px');
+    expect(buttonSize).toBe('24px');
+    expect(iconSize).toBe('13px');
+    expect(unpinnedOpacity).toBe('0');
+    expect(revealedOpacity).toBe('1');
   });
 
   it('keeps new-note controls icon-only without an accent surface', () => {

@@ -16,6 +16,8 @@ import {
 import { installDiagramGuards } from './diagramGuards';
 import { parseEditorMode, type EditorMode, type EditorPreviewMode } from './editorTabs';
 import EditorFindPanel from './EditorFindPanel';
+import TableOverviewDialog from './TableOverviewDialog';
+import { extractMarkdownTables, type MarkdownTable } from './markdownTables';
 import EditorMediaContextMenu, {
   type EditorMediaContextTarget,
 } from './EditorMediaContextMenu';
@@ -289,6 +291,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     target: SourcePreviewTarget;
     anchor?: SourcePreviewLine['anchor'];
   } | null>(null);
+  const [tableOverview, setTableOverview] = useState<MarkdownTable[] | null>(null);
   const {
     confirm: confirmSourcePreviewDelete,
     dialog: sourcePreviewDeleteDialog,
@@ -322,6 +325,7 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   const initializeSourceEditorRef = useRef<() => void>(() => undefined);
   const refreshSourceEditorRef = useRef<() => void>(() => undefined);
   const openSourceGalleryRef = useRef<() => void>(() => undefined);
+  const openTableOverviewRef = useRef<() => void>(() => undefined);
 
   themeRef.current = theme;
   showSourceLineNumbersRef.current = showSourceLineNumbers;
@@ -366,6 +370,36 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
     setSourceLinePreview({ target: items[0] });
   }, [currentEditorMarkdown]);
   openSourceGalleryRef.current = openSourceGallery;
+
+  const openTableOverview = useCallback(() => {
+    const markdown = currentEditorMarkdown();
+    const source = sourceEditorRef.current;
+    if (editorRef.current?.getCurrentMode() !== 'sv' && source &&
+      source.getValue() !== markdown) {
+      source.setValue(markdown);
+    }
+    const tables = extractMarkdownTables(markdown);
+    if (tables.length === 0) {
+      editorRef.current?.tip('此筆記沒有 Markdown 表格', 3200);
+      return;
+    }
+    setTableOverview(tables);
+  }, [currentEditorMarkdown]);
+  openTableOverviewRef.current = openTableOverview;
+
+  const locateMarkdownTable = useCallback((table: MarkdownTable) => {
+    setTableOverview(null);
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (editor.getCurrentMode() !== 'sv') {
+      activateEditorMode(editor, 'sv');
+      window.setTimeout(() => {
+        sourceEditorRef.current?.selectRange(table.from, table.to, true);
+      }, 80);
+      return;
+    }
+    sourceEditorRef.current?.selectRange(table.from, table.to, true);
+  }, []);
 
   const handleSourceLineActivate = useCallback((line: CodeMirrorLineActivation | null) => {
     if (!line) return;
@@ -990,6 +1024,10 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
   }), []);
 
   useEffect(() => {
+    if (!active) setTableOverview(null);
+  }, [active]);
+
+  useEffect(() => {
     if (!findOpen) return undefined;
     const frame = window.requestAnimationFrame(() => {
       const signature = `${findQuery}\u0000${findMatchCase}\u0000${findWholeWord}`;
@@ -1141,6 +1179,12 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
               editorRef.current?.tip('請將游標放在 Markdown 表格內，或選取包含表格的內容', 3200);
             }
           },
+        },
+        {
+          ...toolbarIconItem('tables'),
+          tip: '表格總覽',
+          tipPosition: 'n',
+          click: () => openTableOverviewRef.current(),
         },
         {
           ...toolbarIconItem('gallery'),
@@ -1917,6 +1961,14 @@ const VditorEditor = forwardRef<VditorEditorHandle, VditorEditorProps>(function 
         />
       )}
       {sourcePreviewDeleteDialog}
+      {tableOverview && (
+        <TableOverviewDialog
+          tables={tableOverview}
+          noteTitle={noteTitle}
+          onLocate={locateMarkdownTable}
+          onClose={() => setTableOverview(null)}
+        />
+      )}
       {findOpen && (
         <EditorFindPanel
           query={findQuery}

@@ -65,7 +65,7 @@
 | 子目錄標記 | `.note-card-directory` | 筆記來自子目錄時，在標題前以灰字顯示最後一層目錄名稱與「 / 」。 |
 | 待辦勾選框 | `.todo-checkbox` | 筆記卡片左側的完成狀態切換；只出現在待辦筆記。 |
 | 待辦到期標籤 | `.todo-due-badge` | 筆記卡片上的到期、今天到期或逾期提示。 |
-| 釘選筆記按鈕 | `.pin-note-button` | 將筆記釘選至清單最上方，不受排序與方向影響。 |
+| 釘選筆記按鈕 | `.pin-note-button` | 將筆記釘選至清單最上方，不受排序與方向影響；未釘選的緊湊圖示只在筆記卡片滑鼠移入或鍵盤聚焦時顯示。 |
 | 筆記拖曳 | `.note-card[draggable="true"]` | 將筆記拖到筆記本樹以變更目錄。 |
 | 筆記本放置目標 | `.notebook-row.drop-target` | 拖曳筆記時可接受的筆記本目錄。 |
 | 空清單提示 | `.empty-list` | 沒有筆記或搜尋無結果時顯示。 |
@@ -77,11 +77,12 @@
 | 統一稱呼 | 程式對應 | 說明 |
 |---|---|---|
 | 垃圾桶提示列 | `.trash-banner` | 筆記位於垃圾桶時顯示還原／永久刪除。 |
-| **筆記分頁列** | `.editor-tabs` | 編輯區最上方的已開啟筆記分頁。 |
+| **筆記分頁列** | `.editor-tabs-bar`、`.editor-tabs` | 編輯區最上方的已開啟筆記分頁，最左側是分頁切換選單。 |
 | 釘選分頁 | `.editor-tab.is-pinned` | 永久保留的多個筆記分頁。 |
 | 預覽分頁 | `.editor-tab.is-preview` | 唯一未釘選分頁，開啟其他未釘選筆記時被替換。 |
-| 分頁釘選按鈕 | `.editor-tab-pin` | 釘選或取消釘選分頁。 |
-| 分頁關閉按鈕 | `.editor-tab-close` | 關閉釘選分頁；預覽分頁不顯示。 |
+| 分頁切換選單按鈕 | `.editor-tabs-menu` | 筆記分頁列最左側的下拉選單圖示，水平對齊下方「收合筆記清單」按鈕。 |
+| 分頁切換選單 | `.editor-tabs-menu-popover` | 列出已開啟分頁，以「最後一層目錄（灰） / 筆記名稱」顯示，點擊即可快速切換。 |
+| 分頁釘選按鈕 | `.editor-tab-pin` | 滑鼠移入分頁或鍵盤聚焦時才顯示的緊湊釘選圖示；點擊釘選或取消釘選分頁。 |
 | **筆記標題列** | `.editor-heading` | 編輯區上方固定單列。包含筆記路徑、名稱、匯出與待辦操作。 |
 | 收合筆記清單按鈕 | `.collapse-note-list-button` | 筆記標題列最前方的雙向控制；同時收合或恢復筆記清單與左側導覽欄。 |
 | 筆記路徑 | `.editor-breadcrumbs` | 「筆記本 / 筆記名稱 (儲存狀態)」的整體。 |
@@ -112,6 +113,12 @@
 | 格式化表格按鈕 | `.vditor-toolbar` 的 `format-table` | 在原始碼模式格式化游標所在的 Markdown 表格；有選取內容時批次格式化範圍內所有表格，其他模式停用。 |
 | 自動換行按鈕 | `.vditor-toolbar` 的 `source-word-wrap` | 在原始碼模式切換 CodeMirror 自動換行；狀態與設定視窗同步，其他模式停用。 |
 | 相簿按鈕 | `.vditor-toolbar` 的 `gallery` | 在任何編輯模式開啟目前筆記的圖片與 Mermaid 畫廊；沒有媒體時顯示提示。 |
+| 表格總覽按鈕 | `.vditor-toolbar` 的 `tables` | 收集目前筆記的所有 Markdown 表格，開啟「表格總覽 Dialog」；沒有表格時顯示提示。 |
+| 表格總覽 Dialog | `.table-overview-dialog` | 一次顯示一張表格，提供左右切換、複製 TSV、定位內文與匯出多 sheet XLSX。 |
+| 表格切換列 | `.table-overview-switcher` | Dialog 底部的表格膠囊列，顯示表格編號、列數與欄數，點擊切換目前表格。 |
+| 表格預覽 | `.table-overview-table` | Dialog 中的 Markdown 表格預覽，表頭固定並依對齊列顯示。 |
+| 表格標題列操作 | `.table-overview-header-actions` | 定位內文、複製目前表格 TSV、匯出全部 XLSX、放到最大／還原與關閉。 |
+| 表格狀態列 | `.table-overview-dialog > footer` | 顯示複製與匯出結果或錯誤訊息。 |
 | Mermaid 設定按鈕 | `.vditor-toolbar` 的 `mermaid-config` | 開啟 Mermaid 設定 Dialog，產生可貼進 mermaid 區塊最前面的設定文字。 |
 | Mermaid 設定 Dialog | `.mermaid-config-dialog` | 調整主題、字級、顏色、間距與輸出格式；按「複製」寫入剪貼簿後關閉。 |
 | Mermaid 設定輸出預覽 | `.mermaid-config-output` | 顯示目前選擇的 `%%{init}%%`、frontmatter 或 JSON 設定文字。 |

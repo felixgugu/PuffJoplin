@@ -32,6 +32,7 @@ export const TOOLBAR_ICON_FILE_BY_NAME = {
   upload: 'cloud-arrow-up',
   table: 'table',
   'format-table': 'table-list-solid-full',
+  tables: 'table-cells-large',
   gallery: 'images',
   'mermaid-config': 'sliders',
   'source-word-wrap': 'text-width',
